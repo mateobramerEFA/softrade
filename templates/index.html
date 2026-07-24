@@ -1,0 +1,1885 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Penta Trade</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', -apple-system, sans-serif; background: #f5f5f3; color: #1a1a1a; min-height: 100vh; }
+  .app { display: flex; flex-direction: column; min-height: 100vh; }
+  .nav { background: #fff; border-bottom: 0.5px solid rgba(0,0,0,0.1); padding: 0 24px; display: flex; align-items: center; height: 52px; }
+  .nav-brand { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #1a1a1a; margin-right: 32px; }
+  .nav-brand span { color: #999; font-weight: 400; }
+  .nav-tab { padding: 0 16px; height: 52px; display: flex; align-items: center; font-size: 13px; color: #666; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; white-space: nowrap; user-select: none; }
+  .nav-tab:hover { color: #1a1a1a; }
+  .nav-tab.active { color: #1a1a1a; border-bottom-color: #1a1a1a; font-weight: 500; }
+  .main { flex: 1; padding: 32px 24px; max-width: 960px; margin: 0 auto; width: 100%; }
+  .page { display: none; }
+  .page.active { display: block; }
+  .page-title { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .page-sub { font-size: 13px; color: #666; margin-bottom: 24px; }
+
+  .upload-zone { border: 1.5px dashed rgba(0,0,0,0.2); border-radius: 12px; padding: 48px 24px; text-align: center; cursor: pointer; transition: all 0.2s; background: #fff; }
+  .upload-zone:hover, .upload-zone.drag { border-color: #1a1a1a; background: #fafafa; }
+  .upload-zone.drag { transform: scale(1.01); }
+  .upload-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.35; }
+  .upload-title { font-size: 15px; font-weight: 500; margin-bottom: 6px; }
+  .upload-sub { font-size: 13px; color: #888; }
+  .upload-sub b { color: #1a1a1a; }
+  #fileInput { display: none; }
+
+  .sheet-selector { margin-top: 16px; display: none; background: #fff; border: 0.5px solid rgba(0,0,0,0.12); border-radius: 10px; padding: 16px 20px; }
+  .sheet-selector p { font-size: 13px; color: #666; margin-bottom: 10px; }
+  .sheet-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sheet-btn { padding: 6px 14px; border-radius: 6px; border: 0.5px solid rgba(0,0,0,0.15); background: #f5f5f3; font-size: 13px; cursor: pointer; transition: all 0.15s; }
+  .sheet-btn:hover { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+
+  .status-bar { margin-top: 16px; padding: 12px 16px; border-radius: 8px; font-size: 13px; display: none; align-items: center; gap: 8px; }
+  .status-bar.loading { background: #eff6ff; color: #1d6fb8; display: flex; }
+  .status-bar.success { background: #f0fdf4; color: #166534; display: flex; }
+  .status-bar.error   { background: #fef2f2; color: #991b1b; display: flex; }
+  .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 24px; }
+  .summary-card { background: #fff; border: 0.5px solid rgba(0,0,0,0.1); border-radius: 10px; padding: 16px; }
+  .summary-card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #999; margin-bottom: 6px; }
+  .summary-card .value { font-size: 22px; font-weight: 600; }
+  .summary-card .sub   { font-size: 12px; color: #888; margin-top: 2px; }
+
+  .products-loaded { margin-top: 24px; }
+  .products-loaded h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #999; margin-bottom: 12px; }
+  .product-pill-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .product-pill { background: #f5f5f3; border: 0.5px solid rgba(0,0,0,0.1); border-radius: 6px; padding: 6px 10px; font-size: 12px; }
+  .product-pill .ncm { font-size: 10px; color: #aaa; display: block; margin-bottom: 1px; }
+
+  .upload-section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #999; margin-bottom: 12px; margin-top: 32px; display: flex; align-items: center; gap: 10px; }
+  .upload-section-title::after { content: ''; flex: 1; height: 0.5px; background: rgba(0,0,0,0.1); }
+  .upload-zone-sm { border: 1.5px dashed rgba(0,0,0,0.15); border-radius: 10px; padding: 20px 24px; display: flex; align-items: center; gap: 16px; cursor: pointer; transition: all 0.2s; background: #fff; }
+  .upload-zone-sm:hover { border-color: #1a1a1a; background: #fafafa; }
+  .upload-zone-sm .uz-icon { font-size: 20px; opacity: 0.35; flex-shrink: 0; }
+  .upload-zone-sm .uz-text { flex: 1; }
+  .upload-zone-sm .uz-title { font-size: 13px; font-weight: 500; margin-bottom: 2px; }
+  .upload-zone-sm .uz-sub { font-size: 12px; color: #999; }
+  .config-status { display: flex; align-items: center; gap: 8px; font-size: 12px; flex-shrink: 0; }
+  .config-status.ok { color: #166534; }
+  .config-status.default { color: #999; }
+
+  .filters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; align-items: flex-end; }
+  .filter-group { display: flex; flex-direction: column; gap: 6px; }
+  .filter-group label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #999; }
+  .filter-group select { background: #fff; border: 0.5px solid rgba(0,0,0,0.2); border-radius: 8px; padding: 8px 12px; font-size: 13px; color: #1a1a1a; min-width: 200px; outline: none; cursor: pointer; }
+  .filter-group select:focus { border-color: #1a1a1a; }
+  .btn { padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; background: #1a1a1a; color: #fff; transition: opacity 0.15s; }
+  .btn:hover { opacity: 0.8; }
+
+  .empty-state { text-align: center; padding: 64px 24px; }
+  .empty-state .icon { font-size: 36px; opacity: 0.3; margin-bottom: 12px; }
+  .empty-state p { font-size: 14px; color: #666; }
+  .empty-state .hint { font-size: 13px; color: #aaa; margin-top: 6px; }
+
+  .comparison-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .comparison-header h2 { font-size: 17px; font-weight: 600; }
+  .campaign-badge { font-size: 11px; padding: 3px 8px; border-radius: 4px; border: 0.5px solid rgba(0,0,0,0.12); color: #888; }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
+  .kpi { background: #fff; border: 0.5px solid rgba(0,0,0,0.1); border-radius: 10px; padding: 16px 20px; }
+  .kpi .k-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #999; margin-bottom: 8px; }
+  .kpi .k-val   { font-size: 26px; font-weight: 600; line-height: 1; }
+  .kpi .k-sub   { font-size: 12px; color: #888; margin-top: 4px; }
+  .kpi .k-delta { font-size: 12px; margin-top: 6px; font-weight: 500; }
+  .kpi .k-delta.up      { color: #166534; }
+  .kpi .k-delta.down    { color: #991b1b; }
+  .kpi .k-delta.neutral { color: #888; }
+
+  .chart-section { background: #fff; border: 0.5px solid rgba(0,0,0,0.1); border-radius: 10px; padding: 20px; margin-bottom: 20px; }
+  .chart-section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #999; margin-bottom: 16px; }
+  .chart-wrap { position: relative; height: 220px; }
+  .toggle-log { font-size: 11px; padding: 4px 10px; border-radius: 6px; border: 0.5px solid rgba(0,0,0,0.15); background: #f5f5f3; color: #666; cursor: pointer; transition: all 0.15s; letter-spacing: 0.02em; }
+  .toggle-log:hover { border-color: #1a1a1a; color: #1a1a1a; }
+  .toggle-log.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+
+  .table-section { background: #fff; border: 0.5px solid rgba(0,0,0,0.1); border-radius: 10px; overflow: hidden; margin-bottom: 20px; }
+  .table-section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #999; padding: 16px 20px 0; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; padding: 8px 20px; text-align: left; border-bottom: 0.5px solid rgba(0,0,0,0.08); font-weight: 400; }
+  thead th.num { text-align: right; }
+  tbody tr { border-bottom: 0.5px solid rgba(0,0,0,0.06); transition: background 0.1s; cursor: pointer; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: #fafafa; }
+  tbody td { padding: 10px 20px; font-size: 13px; }
+  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody td.country { font-weight: 500; }
+  .bar-cell { display: flex; align-items: center; gap: 8px; }
+  .bar-bg   { flex: 1; height: 4px; background: rgba(0,0,0,0.07); border-radius: 2px; overflow: hidden; min-width: 60px; }
+  .bar-fill { height: 100%; border-radius: 2px; background: #1a1a1a; }
+  .delta-pill { font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 500; }
+  .delta-pill.up   { background: #f0fdf4; color: #166534; }
+  .delta-pill.down { background: #fef2f2; color: #991b1b; }
+  .delta-pill.new  { background: #eff6ff; color: #1d6fb8; }
+
+  .market-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-top: 16px; }
+  .market-card { background: #fff; border: 0.5px solid rgba(0,0,0,0.1); border-radius: 10px; padding: 16px; cursor: pointer; transition: all 0.15s; }
+  .market-card:hover { border-color: rgba(0,0,0,0.3); transform: translateY(-1px); }
+  .market-card .country-name  { font-size: 14px; font-weight: 500; margin-bottom: 8px; }
+  .market-card .vol           { font-size: 22px; font-weight: 600; }
+  .market-card .vol-label     { font-size: 11px; color: #aaa; }
+  .market-card .products-count{ font-size: 12px; color: #888; margin-top: 6px; }
+
+  /* RITMO ARGENTINA */
+  .ritmo-grid { display: flex; flex-direction: column; gap: 12px; }
+  .ritmo-card { background: #fff; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 10px; padding: 18px 20px; cursor: pointer; transition: all 0.15s; }
+  .ritmo-card:hover { border-color: rgba(0,0,0,0.2); transform: translateY(-1px); }
+  .ritmo-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .ritmo-semaforo { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .ritmo-semaforo.verde  { background: #16a34a; box-shadow: 0 0 6px rgba(22,163,74,0.4); }
+  .ritmo-semaforo.amarillo { background: #ca8a04; box-shadow: 0 0 6px rgba(202,138,4,0.4); }
+  .ritmo-semaforo.rojo   { background: #dc2626; box-shadow: 0 0 6px rgba(220,38,38,0.4); }
+  .ritmo-nombre { font-size: 14px; font-weight: 600; flex: 1; }
+  .ritmo-signal { font-size: 12px; font-weight: 500; }
+  .ritmo-signal.verde    { color: #16a34a; }
+  .ritmo-signal.amarillo { color: #ca8a04; }
+  .ritmo-signal.rojo     { color: #dc2626; }
+  .ritmo-bars { display: flex; flex-direction: column; gap: 8px; }
+  .ritmo-bar-row { display: flex; align-items: center; gap: 10px; }
+  .ritmo-bar-label { font-size: 11px; color: #999; width: 110px; flex-shrink: 0; }
+  .ritmo-bar-label.bold { color: #1a1a1a; font-weight: 500; }
+  .ritmo-bar-bg { flex: 1; height: 8px; background: rgba(0,0,0,0.06); border-radius: 4px; overflow: hidden; position: relative; }
+  .ritmo-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+  .ritmo-bar-fill.actual  { background: #1a1a1a; }
+  .ritmo-bar-fill.hist    { background: rgba(0,0,0,0.2); }
+  .ritmo-bar-val { font-size: 12px; color: #666; width: 72px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .ritmo-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; padding-top: 10px; border-top: 0.5px solid rgba(0,0,0,0.06); }
+  .ritmo-stat { text-align: center; }
+  .ritmo-stat .rv { font-size: 16px; font-weight: 600; }
+  .ritmo-stat .rl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; margin-top: 2px; }
+  .ritmo-elapsed { font-size: 11px; color: #aaa; }
+
+  /* OPORTUNIDADES */
+  .opps-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .opps-col-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .opps-col-title.up   { color: #166534; }
+  .opps-col-title.down { color: #991b1b; }
+  .opp-row { background: #fff; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 8px; padding: 12px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: all 0.12s; }
+  .opp-row:hover { border-color: rgba(0,0,0,0.2); transform: translateX(2px); }
+  .opp-row .opp-country { font-size: 13px; font-weight: 500; flex: 1; min-width: 0; }
+  .opp-row .opp-product { font-size: 11px; color: #999; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .opp-row .opp-delta { font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .opp-row .opp-delta.up   { color: #166534; }
+  .opp-row .opp-delta.down { color: #991b1b; }
+  .opp-row .opp-vols { font-size: 11px; color: #aaa; white-space: nowrap; }
+  .opp-trend { font-size: 11px; margin-top: 2px; font-weight: 500; }
+  .opp-trend.up      { color: #166534; }
+  .opp-trend.down    { color: #991b1b; }
+  .opp-trend.neutral { color: #aaa; }
+  .opp-row.lost { border-color: rgba(153,27,27,0.15); background: #fff9f9; }
+  .opp-row.lost:hover { border-color: rgba(153,27,27,0.3); }
+
+  /* POR MERCADO */
+  .country-product-row { background: #fff; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 10px; padding: 16px 20px; margin-bottom: 10px; }
+  .country-product-row .cp-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+  .country-product-row .cp-name { font-size: 14px; font-weight: 500; }
+  .country-product-row .cp-ncm  { font-size: 11px; color: #aaa; margin-left: 8px; }
+  .country-product-row .cp-delta { font-size: 12px; font-weight: 500; }
+  .country-product-row .cp-delta.up   { color: #166534; }
+  .country-product-row .cp-delta.down { color: #991b1b; }
+  .country-product-row .cp-delta.new  { color: #1d6fb8; }
+  .cp-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .cp-bar-label { font-size: 11px; color: #aaa; width: 100px; flex-shrink: 0; }
+  .cp-bar-bg { flex: 1; height: 6px; background: rgba(0,0,0,0.07); border-radius: 3px; overflow: hidden; }
+  .cp-bar-fill { height: 100%; border-radius: 3px; }
+  .cp-bar-fill.cur  { background: #1a1a1a; }
+  .cp-bar-fill.prev { background: rgba(0,0,0,0.2); }
+  .cp-bar-val { font-size: 12px; color: #666; width: 64px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 600px) {
+    .kpi-row { grid-template-columns: 1fr; }
+    .filters { flex-direction: column; }
+    .filter-group select { min-width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="nav">
+    <div class="nav-brand">Penta <span>Trade</span></div>
+    <div class="nav-tab active" id="tab-upload"   onclick="showPage('upload',this)">Carga de datos</div>
+    <div class="nav-tab"        id="tab-analysis" onclick="showPage('analysis',this)">Análisis por campaña</div>
+    <div class="nav-tab"        id="tab-ritmo"    onclick="showPage('ritmo',this)">Ritmo Argentina</div>
+    <div class="nav-tab"        id="tab-opps"     onclick="showPage('opps',this)">Oportunidades</div>
+    <div class="nav-tab"        id="tab-country"  onclick="showPage('country',this)">Por mercado</div>
+  </nav>
+
+  <div class="main">
+
+    <!-- UPLOAD -->
+    <div class="page active" id="page-upload">
+      <div class="page-title">Carga de datos</div>
+      <div class="page-sub">Subí el Excel de Penta tal cual sale. La app detecta los productos automáticamente.</div>
+
+      <!-- Config de productos -->
+      <div class="upload-section-title">Configuración de productos</div>
+      <div class="upload-zone-sm" onclick="document.getElementById('configInput').click()"
+           ondragover="event.preventDefault()"
+           ondrop="handleConfigDrop(event)">
+        <div class="uz-icon">⚙</div>
+        <div class="uz-text">
+          <div class="uz-title">Posiciones arancelarias y campañas</div>
+          <div class="uz-sub">POSICIONES_ARANCELARIAS_actualizado.xlsx — hoja NOMBRES</div>
+        </div>
+        <div class="config-status" id="configStatus">
+          <span>usando configuración por defecto</span>
+        </div>
+        <input type="file" id="configInput" accept=".xlsx,.xls" style="display:none" onchange="handleConfigFile(this.files[0])">
+      </div>
+
+      <!-- Datos de Penta -->
+      <div class="upload-section-title">Datos de exportación</div>
+      <div class="upload-zone" id="uploadZone"
+           onclick="document.getElementById('fileInput').click()"
+           ondragover="event.preventDefault();this.classList.add('drag')"
+           ondragleave="this.classList.remove('drag')"
+           ondrop="handleDrop(event)">
+        <div class="upload-icon">⬆</div>
+        <div class="upload-title">Arrastrá el archivo o hacé click para seleccionar</div>
+        <div class="upload-sub">Excel de Strade (.xlsx) — <b>uno o varios productos</b></div>
+        <input type="file" id="fileInput" accept=".xlsx,.xls" onchange="handleFile(this.files[0])">
+      </div>
+
+      <!-- Sheet selector -->
+      <div class="sheet-selector" id="sheetSelector">
+        <p>El archivo tiene varias hojas. ¿Cuál querés procesar?</p>
+        <div class="sheet-list" id="sheetList"></div>
+      </div>
+
+      <div class="status-bar" id="statusBar"></div>
+
+      <!-- Preview del backend — aparece antes de confirmar -->
+      <div id="previewBar" style="display:none"></div>
+
+      <!-- Resumen post-confirmación -->
+      <div id="uploadSummary" style="display:none">
+        <div class="summary-grid" id="summaryCards"></div>
+        <div class="products-loaded">
+          <h3>Productos detectados</h3>
+          <div class="product-pill-grid" id="productPills"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ANALYSIS -->
+    <div class="page" id="page-analysis">
+      <div class="page-title">Análisis por campaña</div>
+      <div class="page-sub">Compará la campaña actual contra la anterior para cualquier producto y mercado.</div>
+      <div class="filters">
+        <div class="filter-group">
+          <label>Producto</label>
+          <select id="filterProduct" onchange="updateDestinations()">
+            <option value="">Seleccionar producto...</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Mercado destino</label>
+          <select id="filterDest">
+            <option value="">Todos los mercados</option>
+          </select>
+        </div>
+        <div class="filter-group" style="justify-content:flex-end">
+          <label>&nbsp;</label>
+          <button class="btn" onclick="runAnalysis()">Analizar</button>
+        </div>
+      </div>
+      <div id="analysisResult">
+        <div class="empty-state">
+          <div class="icon">📊</div>
+          <p>Seleccioná un producto para ver el análisis</p>
+          <div class="hint">Primero cargá un Excel en "Carga de datos"</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- OPORTUNIDADES -->
+    <div class="page" id="page-opps">
+      <div class="page-title">Oportunidades</div>
+      <div class="page-sub">Mercados que están comprando más o menos que el mismo período del año anterior.</div>
+      <div class="filters">
+        <div class="filter-group">
+          <label>Producto</label>
+          <select id="filterOppsProduct" onchange="renderOpps()">
+            <option value="">Todos los productos</option>
+          </select>
+        </div>
+      </div>
+      <div id="oppsResult">
+        <div class="empty-state"><div class="icon">📈</div><p>No hay datos cargados todavía</p><div class="hint">Cargá un Excel de Penta para ver oportunidades</div></div>
+      </div>
+    </div>
+
+    <!-- RITMO ARGENTINA -->
+    <div class="page" id="page-ritmo">
+      <div class="page-title">Ritmo Argentina</div>
+      <div class="page-sub">¿Argentina está saliendo rápido o lento vs el histórico? Señal de ventana disponible para vender.</div>
+      <div id="ritmoResult">
+        <div class="empty-state"><div class="icon">🇦🇷</div><p>No hay datos cargados todavía</p><div class="hint">Cargá un Excel de Penta para ver el ritmo</div></div>
+      </div>
+    </div>
+
+    <!-- POR MERCADO -->
+    <div class="page" id="page-country">
+      <div class="page-title">Por mercado</div>
+      <div class="page-sub">Todos los productos exportados a un país en la campaña actual vs anterior.</div>
+      <div class="filters">
+        <div class="filter-group">
+          <label>País destino</label>
+          <select id="filterCountry" onchange="renderCountry()">
+            <option value="">Seleccionar país...</option>
+          </select>
+        </div>
+      </div>
+      <div id="countryResult">
+        <div class="empty-state"><div class="icon">🌍</div><p>Seleccioná un país para ver el detalle</p><div class="hint">Primero cargá datos en "Carga de datos"</div></div>
+      </div>
+    </div>
+
+
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+
+const PRODUCT_CONFIG = [
+  {ncm:"11061000500T", nombre:"Harina de poroto mung",        mes_inicio:1},
+  {ncm:"11061000200B", nombre:"Harina de garbanzo",            mes_inicio:1},
+  {ncm:"11061000100W", nombre:"Harina de arveja amarilla",     mes_inicio:1},
+  {ncm:"21061000000Z", nombre:"Texturizado de arveja",         mes_inicio:1},
+  {ncm:"23040010",     nombre:"Texturizado de soja",           mes_inicio:1},
+  {ncm:"12089000000X", nombre:"Harina de lupino",              mes_inicio:1},
+  {ncm:"10059010219X", nombre:"Maíz pisingallo",               mes_inicio:5},
+  {ncm:"07133190900N", nombre:"Poroto mung",                   mes_inicio:4},
+  {ncm:"07133319100J", nombre:"Poroto negro",                  mes_inicio:6},
+  {ncm:"07132090912V", nombre:"Garbanzo 8mm",                  mes_inicio:11},
+  {ncm:"07132090913X", nombre:"Garbanzo 7mm",                  mes_inicio:11},
+  {ncm:"07131090912F", nombre:"Arveja amarilla",               mes_inicio:12},
+  {ncm:"12149000900T", nombre:"Lupino",                        mes_inicio:12},
+  {ncm:"09092100000Q", nombre:"Coriandro",                     mes_inicio:11},
+  {ncm:"09092200000C", nombre:"Coriandro partido",             mes_inicio:11},
+  {ncm:"07132090911T", nombre:"Garbanzo 9mm",                  mes_inicio:11},
+  {ncm:"07132090920U", nombre:"Garbanzo partido",              mes_inicio:11},
+  {ncm:"07131090911D", nombre:"Arveja verde entera",           mes_inicio:12},
+  {ncm:"07131090921G", nombre:"Arveja verde partida",          mes_inicio:12},
+  {ncm:"07133399112V", nombre:"LRKB",                          mes_inicio:6},
+  {ncm:"07133399122Y", nombre:"DRKB",                          mes_inicio:6},
+  {ncm:"07133329920U", nombre:"Poroto blanco",                 mes_inicio:6},
+  {ncm:"07131090922J", nombre:"Arveja amarilla partida",       mes_inicio:12},
+  {ncm:"15121110919G", nombre:"Aceite crudo",                  mes_inicio:1},
+  {ncm:"15121110911P", nombre:"Aceite crudo alto oleico",      mes_inicio:1},
+  {ncm:"23063090100J", nombre:"Expeller",                      mes_inicio:1},
+  {ncm:"12060090910Y", nombre:"Girasol",                       mes_inicio:1},
+  {ncm:"10059010190Y", nombre:"Maíz común",                    mes_inicio:1},
+  {ncm:"07133329113D", nombre:"Alubias (221+ granos)",         mes_inicio:6},
+  {ncm:"07133399119K", nombre:"RKB (los demás)",               mes_inicio:6},
+  {ncm:"07133329112B", nombre:"Alubias (191-220 granos)",      mes_inicio:6},
+  {ncm:"07132090919K", nombre:"Garbanzo 5/6",                  mes_inicio:11},
+  {ncm:"07133329111Z", nombre:"Alubias (hasta 190 granos)",    mes_inicio:6},
+  {ncm:"07133399929G", nombre:"Cranberry",                     mes_inicio:6},
+  {ncm:"07133319900C", nombre:"Poroto negro (los demás)",      mes_inicio:6},
+  {ncm:"07133319300V", nombre:"Poroto negro (1-2kg)",          mes_inicio:6},
+  {ncm:"07133319200P", nombre:"Poroto negro (menos 1kg)",      mes_inicio:6},
+];
+
+const API_BASE = window.location.origin;
+
+// ── UTILS básicos (necesarios antes del STATE) ────────────────────────────
+function normalizeNCM(raw) {
+  return String(raw || '').replace(/[\.\-\s]/g, '').toUpperCase().trim();
+}
+
+// ── STATE ──────────────────────────────────────────────────────────────────
+let DB = {};
+let activeChart = null;
+let loadedWB = null;
+let logScale = false;
+let lastChartData = null;
+
+// Sin datos históricos sintéticos — usar datos reales cuando estén disponibles
+const HIST_DB = {};
+const MONTH_MAP = {
+  'ENERO':1,'FEBRERO':2,'MARZO':3,'ABRIL':4,'MAYO':5,'JUNIO':6,
+  'JULIO':7,'AGOSTO':8,'SEPTIEMBRE':9,'OCTUBRE':10,'NOVIEMBRE':11,'DICIEMBRE':12
+};
+
+// ── CONFIG FILE ─────────────────────────────────────────────────────────────
+function handleConfigDrop(e) {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) handleConfigFile(f);
+}
+
+function handleConfigFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      // Buscar hoja NOMBRES, si no existe tomar la primera
+      const wsName = wb.SheetNames.find(n => n.toUpperCase().includes('NOMBRE')) || wb.SheetNames[0];
+      const ws = wb.Sheets[wsName];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
+
+      let loaded = 0;
+      // Limpiar config existente y recargar
+      PRODUCT_CONFIG.length = 0;
+
+      for (let i = 1; i < rows.length; i++) {
+        const r = rows[i];
+        const ncm     = String(r[0] || '').replace(/\s/g,'').replace(/\xa0/g,'').trim();
+        const nombre  = String(r[1] || '').trim();
+        const mesStr  = String(r[2] || '').toUpperCase().trim();
+        const mes     = MONTH_MAP[mesStr];
+
+        if (!ncm || !nombre || !mes) continue;
+        PRODUCT_CONFIG.push({ ncm, nombre: toTitleCase(nombre), mes_inicio: mes });
+        loaded++;
+      }
+
+      const el = document.getElementById('configStatus');
+      el.className = 'config-status ok';
+      el.innerHTML = `✓ ${loaded} productos cargados`;
+
+      // Si ya hay datos, repoblar filtros con nueva config
+      if (Object.keys(DB).length > 0) populateFilters();
+
+    } catch(err) {
+      document.getElementById('configStatus').innerHTML = '✕ Error al leer el archivo';
+      document.getElementById('configStatus').className = 'config-status';
+      console.error(err);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function toTitleCase(str) {
+  return str.toLowerCase().replace(/(?:^|\s)\S/g, c => c.toUpperCase());
+}
+
+// ── NAVIGATION ─────────────────────────────────────────────────────────────
+function showPage(name, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  el.classList.add('active');
+  if (name === 'opps')    renderOpps();
+  if (name === 'country') renderCountry();
+  if (name === 'ritmo')   renderRitmo();
+  if (name === 'imports') populateImportFilters();
+  if (name === 'captura') renderCaptura();
+}
+
+// ── FILE HANDLING — todo pasa por el backend ───────────────────────────────
+let pendingToken = null;
+let pendingFile  = null;
+
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('uploadZone').classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+}
+
+function handleFile(file) {
+  if (!file) return;
+  pendingFile  = file;
+  pendingToken = null;
+  document.getElementById('sheetSelector').style.display = 'none';
+  document.getElementById('previewBar').style.display    = 'none';
+  document.getElementById('uploadSummary').style.display = 'none';
+  setStatus('loading', 'Enviando al servidor...');
+  sendPreview(file, null);
+}
+
+async function sendPreview(file, sheet) {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (sheet) formData.append('sheet', sheet);
+
+  try {
+    const res  = await fetch(`${API_BASE}/api/preview`, { method: 'POST', body: formData });
+    const data = await res.json();
+
+    if (!res.ok) {
+      const msg = Array.isArray(data.detail)
+        ? data.detail.map(e => e.message).join(' · ')
+        : data.error || 'Error al procesar el archivo.';
+      setStatus('error', msg);
+      return;
+    }
+
+    // Varias hojas y no se eligió — mostrar selector
+    if (data.sheets && data.sheets.length > 1 && !sheet) {
+      setStatus('loading', 'El archivo tiene varias hojas. ¿Cuál querés procesar?');
+      document.getElementById('sheetList').innerHTML = data.sheets.map(s =>
+        `<button class="sheet-btn" onclick="sendPreview(pendingFile,'${s}')">${s}</button>`
+      ).join('');
+      document.getElementById('sheetSelector').style.display = 'block';
+      return;
+    }
+
+    pendingToken = data.token;
+    showPreview(data);
+
+  } catch(err) {
+    setStatus('error', 'No se pudo conectar con el servidor.');
+  }
+}
+
+function showPreview(data) {
+  document.getElementById('sheetSelector').style.display = 'none';
+  setStatus('success', `Preview listo — ${data.loaded.toLocaleString()} registros leídos. (${data.skipped} omitidos)`);
+
+  const byNcm = (data.by_ncm || []).map(r => {
+    const cfg = PRODUCT_CONFIG.find(p => p.ncm.replace(/[\.\ -\s]/g,'').toUpperCase() === r.ncm);
+    return `<div class="product-pill"><span class="ncm">${r.ncm}</span>${cfg ? cfg.nombre : r.ncm} — ${fmtTon(r.vol_total)} ton</div>`;
+  }).join('');
+
+  document.getElementById('previewBar').style.display = 'block';
+  document.getElementById('previewBar').innerHTML = `
+    <div style="background:#f0fdf4;border:0.5px solid rgba(22,163,74,0.25);border-radius:10px;padding:18px 20px;margin-top:12px">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.06em;color:#166534;margin-bottom:14px;font-weight:500">
+        Preview — ${data.filename}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:14px">
+        <div><div style="font-size:22px;font-weight:600">${data.loaded.toLocaleString()}</div><div style="font-size:11px;color:#666">registros</div></div>
+        <div><div style="font-size:22px;font-weight:600">${data.products}</div><div style="font-size:11px;color:#666">productos</div></div>
+        <div><div style="font-size:22px;font-weight:600">${data.markets}</div><div style="font-size:11px;color:#666">mercados</div></div>
+        <div><div style="font-size:14px;font-weight:600">${data.period_from} → ${data.period_to}</div><div style="font-size:11px;color:#666">período</div></div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">${byNcm}</div>
+      <div style="display:flex;gap:10px">
+        <button class="btn" id="btnConfirm" onclick="confirmUpload(this)">✓ Guardar en base de datos</button>
+        <button class="btn" style="background:#fff;color:#991b1b;border:0.5px solid rgba(153,27,27,0.2)" onclick="discardUpload()">Descartar</button>
+      </div>
+    </div>`;
+}
+
+async function confirmUpload(btn) {
+  if (!pendingToken) return;
+  btn.disabled    = true;
+  btn.textContent = 'Guardando...';
+
+  try {
+    const res  = await fetch(`${API_BASE}/api/confirm/${pendingToken}`, { method: 'POST' });
+    const data = await res.json();
+
+    if (data.ok) {
+      const total = data.inserted + data.duplicates;
+      const msg = data.inserted === 0
+        ? `✓ Sin filas nuevas — ${data.duplicates} ya estaban en la base de datos.`
+        : data.duplicates > 0
+          ? `✓ ${data.inserted} filas nuevas guardadas. ${data.duplicates} ya existían.`
+          : `✓ ${data.inserted} filas guardadas correctamente.`;
+      setStatus('success', msg);
+      pendingToken = null;
+      document.getElementById('previewBar').style.display = 'none';
+      await loadDBIntoMemory();
+    } else {
+      setStatus('error', data.error || 'Error al guardar.');
+      btn.disabled    = false;
+      btn.textContent = '✓ Guardar en base de datos';
+    }
+  } catch(err) {
+    setStatus('error', 'Error de conexión al confirmar.');
+    btn.disabled    = false;
+    btn.textContent = '✓ Guardar en base de datos';
+  }
+}
+
+async function discardUpload() {
+  if (pendingToken) {
+    try { await fetch(`${API_BASE}/api/discard/${pendingToken}`, { method: 'POST' }); } catch(e) {}
+    pendingToken = null;
+  }
+  document.getElementById('previewBar').style.display = 'none';
+  setStatus('loading', 'Carga descartada.');
+  setTimeout(() => { document.getElementById('statusBar').style.display = 'none'; }, 2000);
+}
+
+async function loadDBIntoMemory() {
+  try {
+    const res  = await fetch(`${API_BASE}/api/summary`);
+    const data = await res.json();
+    DB = {};
+    Object.entries(data.data || {}).forEach(([ncm, paises]) => {
+      DB[ncm] = {};
+      Object.entries(paises).forEach(([pais, meses]) => {
+        DB[ncm][pais] = {};
+        Object.entries(meses).forEach(([mes, vol]) => {
+          DB[ncm][pais][mes] = { vol, fob: 0 };
+        });
+      });
+    });
+    populateFilters();
+    showUploadSummary();
+  } catch(err) {
+    console.warn('No se pudo cargar desde el backend:', err.message);
+  }
+}
+
+function showUploadSummary() {
+  const ncms = Object.keys(DB);
+  if (!ncms.length) return;
+  const totalVol = ncms.reduce((a, ncm) =>
+    a + Object.values(DB[ncm]).reduce((b, meses) =>
+      b + Object.values(meses).reduce((c, m) => c + m.vol, 0), 0), 0);
+  const allDates = [];
+  ncms.forEach(ncm => Object.values(DB[ncm]).forEach(meses =>
+    Object.keys(meses).forEach(m => allDates.push(m))));
+  allDates.sort();
+  const countries = new Set(ncms.flatMap(ncm => Object.keys(DB[ncm])));
+  const uniqueRows = ncms.reduce((a,ncm) => a + Object.values(DB[ncm]).reduce((b,p) => b + Object.keys(p).length, 0), 0);
+
+  document.getElementById('summaryCards').innerHTML = `
+    <div class="summary-card"><div class="label">Registros únicos</div><div class="value">${uniqueRows.toLocaleString()}</div><div class="sub">en base de datos</div></div>
+    <div class="summary-card"><div class="label">Productos NCM</div><div class="value">${ncms.length}</div><div class="sub">posiciones arancelarias</div></div>
+    <div class="summary-card"><div class="label">Mercados</div><div class="value">${countries.size}</div><div class="sub">países destino</div></div>
+    <div class="summary-card"><div class="label">Volumen total</div><div class="value">${fmtTon(totalVol)}</div><div class="sub">toneladas</div></div>
+    <div class="summary-card"><div class="label">Período</div><div class="value" style="font-size:14px">${allDates[0]} → ${allDates[allDates.length-1]}</div></div>
+  `;
+  document.getElementById('productPills').innerHTML = ncms.map(ncm => {
+    const cfg = findConfig(ncm);
+    return `<div class="product-pill"><span class="ncm">${ncm}</span>${cfg ? cfg.nombre : ncm}</div>`;
+  }).join('');
+  document.getElementById('uploadSummary').style.display = 'block';
+}
+
+function setStatus(type, msg) {
+  const el = document.getElementById('statusBar');
+  el.className = 'status-bar ' + type;
+  el.style.display = 'flex';
+  const icon = type === 'loading' ? '<div class="spinner"></div>' : type === 'success' ? '✓' : '✕';
+  el.innerHTML = `<span>${icon}</span><span>${msg}</span>`;
+}
+
+
+// ── FILTERS ────────────────────────────────────────────────────────────────
+function findConfig(ncm) {
+  const norm = normalizeNCM(ncm);
+  return PRODUCT_CONFIG.find(p => normalizeNCM(p.ncm) === norm);
+}
+
+function populateFilters() {
+  const opts = Object.keys(DB).map(ncm => {
+    const cfg = findConfig(ncm);
+    return `<option value="${ncm}">${cfg ? cfg.nombre : ncm}</option>`;
+  }).join('');
+
+  document.getElementById('filterProduct').innerHTML =
+    '<option value="">Seleccionar producto...</option>' + opts;
+  document.getElementById('filterOppsProduct').innerHTML =
+    '<option value="">Todos los productos</option>' + opts;
+  document.getElementById('filterCapturaProduct').innerHTML =
+    '<option value="">Todos los productos</option>' + opts;
+
+  const allCountries = new Set();
+  Object.values(DB).forEach(paises => Object.keys(paises).forEach(p => allCountries.add(p)));
+  document.getElementById('filterCountry').innerHTML =
+    '<option value="">Seleccionar país...</option>' +
+    [...allCountries].sort().map(p => `<option value="${p}">${p}</option>`).join('');
+}
+
+function updateDestinations() {
+  const ncm = document.getElementById('filterProduct').value;
+  const el  = document.getElementById('filterDest');
+  if (!ncm || !DB[ncm]) { el.innerHTML = '<option value="">Todos los mercados</option>'; return; }
+  el.innerHTML = '<option value="">Todos los mercados</option>' +
+    Object.keys(DB[ncm]).sort().map(p => `<option value="${p}">${p}</option>`).join('');
+}
+
+// ── ANALYSIS ───────────────────────────────────────────────────────────────
+function getCampaignMonths(mesInicio, year) {
+  return Array.from({length: 12}, (_, i) => {
+    const m = ((mesInicio - 1 + i) % 12) + 1;
+    const y = year + Math.floor((mesInicio - 1 + i) / 12);
+    return `${y}-${String(m).padStart(2,'0')}`;
+  });
+}
+
+function getCurrentCampaignYear(mesInicio) {
+  const now = new Date();
+  return now.getMonth() + 1 >= mesInicio ? now.getFullYear() : now.getFullYear() - 1;
+}
+
+function runAnalysis() {
+  const ncm = document.getElementById('filterProduct').value;
+  if (!ncm) { alert('Seleccioná un producto'); return; }
+
+  const paisFiltro = document.getElementById('filterDest').value;
+  const cfg        = findConfig(ncm);
+  const mesInicio  = cfg ? cfg.mes_inicio : 1;
+  const nombre     = cfg ? cfg.nombre : ncm;
+
+  const curYear  = getCurrentCampaignYear(mesInicio);
+  const prevYear = curYear - 1;
+  const curMonths  = getCampaignMonths(mesInicio, curYear);   // 12 meses completos campaña actual
+  const prevMonths = getCampaignMonths(mesInicio, prevYear);  // 12 meses completos campaña anterior
+
+  // Calcular cuántos meses han transcurrido en la campaña actual hasta hoy
+  const now     = new Date();
+  const nowKey  = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const elapsed = curMonths.filter(m => m <= nowKey).length; // meses transcurridos
+
+  // Para la comparación justa: misma cantidad de meses en ambas campañas
+  const curMonthsComparable  = curMonths.slice(0, elapsed);
+  const prevMonthsComparable = prevMonths.slice(0, elapsed);
+
+  const paises = paisFiltro ? [paisFiltro] : Object.keys(DB[ncm] || {});
+
+  const getVols = months => months.map(m =>
+    paises.reduce((a, p) => a + (DB[ncm]?.[p]?.[m]?.vol || 0), 0));
+
+  const mNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+  // ── Promedio histórico (2022+2023) para los mismos meses ─────────────────
+  const getHistAvg = (months, ps) => months.map(m => {
+    // Mapear mes de campaña actual a los años históricos
+    const [yr, mo] = m.split('-');
+    const offset = parseInt(yr) - 2024; // cuántos años adelante está vs 2024
+    const histYears = [2022, 2023];
+    let total = 0, count = 0;
+    histYears.forEach(hy => {
+      const histM = `${hy + offset}-${mo}`;
+      ps.forEach(p => {
+        const v = HIST_DB[ncm]?.[p]?.[histM];
+        if (v !== undefined) { total += v; count++; }
+      });
+    });
+    return count > 0 ? total / histYears.length : null;
+  });
+
+  const histAvgChart = getHistAvg(curMonths, paises);
+  const histAvgComparable = getHistAvg(curMonthsComparable, paises);
+  const histTotal = histAvgComparable.reduce((a,v) => a + (v || 0), 0);
+  const histRitmo = elapsed > 0 ? histTotal / elapsed : 0;
+
+  // Para el gráfico: todos los 12 meses
+  const curVolsChart  = getVols(curMonths);
+  const prevVolsChart = getVols(prevMonths);
+
+  // Para los KPIs: solo los meses comparables
+  const curVols   = getVols(curMonthsComparable);
+  const prevVols  = getVols(prevMonthsComparable);
+  const curTotal  = curVols.reduce((a,b) => a+b, 0);
+  const prevTotal = prevVols.reduce((a,b) => a+b, 0);
+
+  // ── KPI 1: Ritmo mensual promedio ─────────────────────────────────────────
+  const ritmoActual = elapsed > 0 ? curTotal / elapsed : 0;
+  const ritmoPrev   = elapsed > 0 ? prevTotal / elapsed : 0;
+  const ritmoDelta  = ritmoPrev > 0 ? (ritmoActual - ritmoPrev) / ritmoPrev * 100 : null;
+
+  // ── KPI 2: Proyección cierre de campaña ───────────────────────────────────
+  const proyeccion    = Math.round(ritmoActual * 12);
+  const prevCampTotal = prevVolsChart.reduce((a,b) => a+b, 0);
+  const proyDelta     = prevCampTotal > 0 ? (proyeccion - prevCampTotal) / prevCampTotal * 100 : null;
+
+  // ── KPI 3: Tendencia últimos 3 meses vs mismos 3 del año anterior ─────────
+  const last3Cur  = curMonthsComparable.slice(-3);
+  const last3Prev = prevMonthsComparable.slice(-3);
+  const vol3Cur   = last3Cur.reduce((a,m)  => a + paises.reduce((b,p) => b + (DB[ncm]?.[p]?.[m]?.vol || 0), 0), 0);
+  const vol3Prev  = last3Prev.reduce((a,m) => a + paises.reduce((b,p) => b + (DB[ncm]?.[p]?.[m]?.vol || 0), 0), 0);
+  const trend3    = vol3Prev > 0 ? (vol3Cur - vol3Prev) / vol3Prev * 100 : null;
+  const trend3Vol = vol3Cur - vol3Prev;
+  const last3Label = last3Cur.length >= 2
+    ? `${mNames[+last3Cur[0].split('-')[1]-1]}–${mNames[+last3Cur[last3Cur.length-1].split('-')[1]-1]}`
+    : '—';
+  const trendSignal = trend3 === null ? '' :
+    Math.abs(trend3) < 5 ? '→ mercado estable' :
+    trend3 > 15  ? '↑ acelerando fuerte' :
+    trend3 > 0   ? '↑ acelerando' :
+    trend3 < -15 ? '↓ frenando fuerte' : '↓ frenando';
+
+  const destData = {};
+  paises.forEach(p => {
+    const cur  = curMonthsComparable.reduce((a,m)  => a + (DB[ncm]?.[p]?.[m]?.vol || 0), 0);
+    const prev = prevMonthsComparable.reduce((a,m) => a + (DB[ncm]?.[p]?.[m]?.vol || 0), 0);
+    if (cur > 0 || prev > 0) destData[p] = { cur, prev };
+  });
+  const destRows = Object.entries(destData).sort((a,b) => b[1].cur - a[1].cur).slice(0, 25);
+
+  const monthLabels = curMonths.map((m, i) => {
+    const label = mNames[+m.split('-')[1]-1];
+    return i < elapsed ? label : label + '*';
+  });
+
+  const fmtD  = (d) => d === null ? '—' : `${d >= 0 ? '+' : ''}${d.toFixed(1)}%`;
+  const cls   = (d) => d === null ? 'neutral' : d >= 0 ? 'up' : 'down';
+
+  document.getElementById('analysisResult').innerHTML = `
+    <div class="comparison-header">
+      <h2>${nombre}</h2>
+      ${paisFiltro ? `<span class="campaign-badge">${paisFiltro}</span>` : ''}
+      <span class="campaign-badge">Campaña ${curYear}–${curYear+1}</span>
+      <span class="campaign-badge">${elapsed} meses transcurridos</span>
+      ${paisFiltro && IMPORTS_DB[paisFiltro]?.[ncm] ? `
+        <button onclick="goToImports('${paisFiltro}','${ncm}')"
+          style="margin-left:auto;padding:5px 12px;border-radius:6px;border:0.5px solid rgba(0,0,0,0.15);
+                 background:#fff;font-size:12px;cursor:pointer;color:#1a1a1a;transition:all 0.15s"
+          onmouseover="this.style.background='#1a1a1a';this.style.color='#fff'"
+          onmouseout="this.style.background='#fff';this.style.color='#1a1a1a'">
+          🌐 Ver en contexto mundial
+        </button>` : ''}
+    </div>
+    <div class="kpi-row">
+      <div class="kpi">
+        <div class="k-label">Ritmo de compra</div>
+        <div class="k-val">${fmtTon(ritmoActual)}<span style="font-size:14px;font-weight:400;color:#aaa"> ton/mes</span></div>
+        <div class="k-sub">ant. ${fmtTon(ritmoPrev)} · prom. hist. ${fmtTon(histRitmo)} ton/mes</div>
+        <div class="k-delta ${cls(ritmoDelta)}">${fmtD(ritmoDelta)} vs mismo período anterior</div>
+      </div>
+      <div class="kpi">
+        <div class="k-label">Proyección cierre campaña</div>
+        <div class="k-val">${fmtTon(proyeccion)}<span style="font-size:14px;font-weight:400;color:#aaa"> ton</span></div>
+        <div class="k-sub">ant. cerró ${fmtTon(prevCampTotal)} · prom. hist. ${fmtTon(histTotal > 0 ? Math.round(histTotal / elapsed * 12) : 0)} ton</div>
+        <div class="k-delta ${cls(proyDelta)}">${fmtD(proyDelta)} vs campaña anterior completa</div>
+      </div>
+      <div class="kpi">
+        <div class="k-label">Tendencia reciente <span style="font-weight:400;color:#aaa">(${last3Label})</span></div>
+        <div class="k-val">${trend3 !== null ? (trend3Vol >= 0 ? '+' : '') + fmtTon(trend3Vol) : '—'}<span style="font-size:14px;font-weight:400;color:#aaa"> ton</span></div>
+        <div class="k-sub">${fmtTon(vol3Cur)} ton vs ${fmtTon(vol3Prev)} ton año anterior</div>
+        <div class="k-delta ${cls(trend3)}">${trendSignal}</div>
+      </div>
+    </div>
+    <div class="chart-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <h3 style="margin-bottom:0">Volumen mensual — campaña actual vs anterior</h3>
+        <button class="toggle-log" id="logToggle" onclick="toggleLogScale()" title="Escala logarítmica">Escala log</button>
+      </div>
+      <div class="chart-wrap"><canvas id="campaignChart"></canvas></div>
+    </div>
+    <div class="table-section">
+      <h3>Destinos — top mercados campaña actual</h3>
+      <table>
+        <thead><tr>
+          <th>País</th><th class="num">Actual (ton)</th><th class="num">Anterior (ton)</th>
+          <th class="num">Variación</th><th>Participación</th>
+        </tr></thead>
+        <tbody>
+          ${destRows.map(([p, d]) => {
+            const dlt = d.prev > 0 ? (d.cur - d.prev) / d.prev * 100 : null;
+            const dc  = dlt === null ? 'new' : dlt >= 0 ? 'up' : 'down';
+            const dl  = dlt === null ? 'nuevo' : (dlt >= 0 ? '+' : '') + dlt.toFixed(0) + '%';
+            const pct = curTotal > 0 ? d.cur / curTotal * 100 : 0;
+            return `<tr onclick="drillCountry('${ncm}','${p}')">
+              <td class="country">${p}</td>
+              <td class="num">${fmtTon(d.cur)}</td>
+              <td class="num">${fmtTon(d.prev)}</td>
+              <td class="num"><span class="delta-pill ${dc}">${dl}</span></td>
+              <td><div class="bar-cell">
+                <div class="bar-bg"><div class="bar-fill" style="width:${pct.toFixed(1)}%"></div></div>
+                <span style="font-size:11px;color:#aaa;min-width:32px">${pct.toFixed(0)}%</span>
+              </div></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+
+  lastChartData = { curVolsChart, prevVolsChart, histAvgChart, monthLabels, curYear, prevYear };
+  logScale = false;
+  const btn = document.getElementById('logToggle');
+  if (btn) btn.classList.remove('active');
+  drawChart(lastChartData);
+}
+
+function toggleLogScale() {
+  if (!lastChartData) return;
+  logScale = !logScale;
+  const btn = document.getElementById('logToggle');
+  if (btn) btn.classList.toggle('active', logScale);
+  drawChart(lastChartData);
+}
+
+function drawChart({ curVolsChart, prevVolsChart, histAvgChart, monthLabels, curYear, prevYear }) {
+  if (activeChart) activeChart.destroy();
+  const ctx = document.getElementById('campaignChart').getContext('2d');
+  activeChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: monthLabels,
+      datasets: [
+        { label: `Campaña ${curYear}`,  data: curVolsChart,  backgroundColor: 'rgba(26,26,26,0.85)', borderRadius: 3, order: 2 },
+        { label: `Campaña ${prevYear}`, data: prevVolsChart, backgroundColor: 'rgba(26,26,26,0.15)', borderRadius: 3, order: 3 },
+        { label: 'Prom. hist. 2022–23', data: histAvgChart,  type: 'line', borderColor: 'rgba(220,80,60,0.7)', backgroundColor: 'transparent', borderWidth: 2, borderDash: [5,3], pointRadius: 2, pointBackgroundColor: 'rgba(220,80,60,0.7)', tension: 0.3, order: 1 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#999', font: { size: 11 }, boxWidth: 12 } } },
+      scales: {
+        x: { grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { color: '#aaa', font: { size: 11 } } },
+        y: {
+          type: logScale ? 'logarithmic' : 'linear',
+          grid: { color: 'rgba(0,0,0,0.05)' },
+          ticks: { color: '#aaa', font: { size: 11 }, callback: v => fmtTon(v) }
+        }
+      }
+    }
+  });
+}
+
+function drillCountry(ncm, pais) {
+  document.getElementById('filterDest').value = pais;
+  runAnalysis();
+}
+
+// ── RITMO ARGENTINA ────────────────────────────────────────────────────────
+function renderRitmo() {
+  const ncms = Object.keys(DB);
+  if (ncms.length === 0) {
+    document.getElementById('ritmoResult').innerHTML = `
+      <div class="empty-state"><div class="icon">🇦🇷</div><p>No hay datos cargados todavía</p></div>`;
+    return;
+  }
+
+  const now    = new Date();
+  const nowKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const mNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+  const cards = ncms.map(ncm => {
+    const cfg       = findConfig(ncm);
+    const nombre    = cfg ? cfg.nombre : ncm;
+    const mesInicio = cfg ? cfg.mes_inicio : 1;
+    const curYear   = getCurrentCampaignYear(mesInicio);
+    const curMonths  = getCampaignMonths(mesInicio, curYear);
+    const prevMonths = getCampaignMonths(mesInicio, curYear - 1);
+    const elapsed   = curMonths.filter(m => m <= nowKey).length;
+    if (elapsed === 0) return null;
+
+    const curM  = curMonths.slice(0, elapsed);
+    const prevM = prevMonths.slice(0, elapsed);
+
+    // Volumen total Argentina esta campaña vs anterior (todos los países)
+    const allPaises = Object.keys(DB[ncm] || {});
+    const volCur  = curM.reduce((a,m)  => a + allPaises.reduce((b,p) => b + (DB[ncm]?.[p]?.[m]?.vol || 0), 0), 0);
+    const volPrev = prevM.reduce((a,m) => a + allPaises.reduce((b,p) => b + (DB[ncm]?.[p]?.[m]?.vol || 0), 0), 0);
+
+    // Promedio histórico (HIST_DB) — mismo período
+    const histVol = curM.reduce((a,m) => {
+      const [yr, mo] = m.split('-');
+      const offset = parseInt(yr) - 2024;
+      let t = 0, c = 0;
+      [2022, 2023].forEach(hy => {
+        const hm = `${hy + offset}-${mo}`;
+        allPaises.forEach(p => {
+          const v = HIST_DB[ncm]?.[p]?.[hm];
+          if (v !== undefined) { t += v; c++; }
+        });
+      });
+      return a + (c > 0 ? t / 2 : 0);
+    }, 0);
+
+    // Ritmo = vol / elapsed (ton/mes promedio)
+    const ritmoCur  = volCur  / elapsed;
+    const ritmoPrev = volPrev / elapsed;
+    const ritmoHist = histVol / elapsed;
+
+    // Referencia: promedio de anterior e histórico
+    const ritmoRef = ritmoHist > 0
+      ? (ritmoPrev + ritmoHist) / 2
+      : ritmoPrev;
+
+    // Ratio: qué tan rápido va vs la referencia
+    const ratio = ritmoRef > 0 ? ritmoCur / ritmoRef : 1;
+
+    // Semáforo
+    let color, signal;
+    if (ratio < 0.85) {
+      color  = 'verde';
+      signal = '🟢 Saliendo lento — ventana disponible';
+    } else if (ratio > 1.15) {
+      color  = 'rojo';
+      signal = '🔴 Saliendo rápido — mercado cubriéndose';
+    } else {
+      color  = 'amarillo';
+      signal = '🟡 Ritmo normal vs histórico';
+    }
+
+    // Proyección al cierre
+    const proyeccion = Math.round(ritmoCur * 12);
+    const prevTotal  = prevMonths.reduce((a,m) => a + allPaises.reduce((b,p) => b + (DB[ncm]?.[p]?.[m]?.vol || 0), 0), 0);
+    const proyDelta  = prevTotal > 0 ? (proyeccion - prevTotal) / prevTotal * 100 : null;
+
+    const maxBar = Math.max(volCur, volPrev, histVol, 1);
+    const pctCur  = (volCur  / maxBar * 100).toFixed(1);
+    const pctPrev = (volPrev / maxBar * 100).toFixed(1);
+    const pctHist = (histVol / maxBar * 100).toFixed(1);
+
+    const mesLabel = mNames[mesInicio - 1];
+    const elapsedLabel = `${elapsed} mes${elapsed !== 1 ? 'es' : ''} desde ${mesLabel}`;
+
+    return { ncm, nombre, color, signal, volCur, volPrev, histVol,
+             pctCur, pctPrev, pctHist, ritmoCur, proyeccion, proyDelta,
+             prevTotal, elapsedLabel, ratio };
+  }).filter(Boolean);
+
+  // Ordenar: rojo primero (más urgente de ver), luego amarillo, luego verde
+  const order = { rojo: 0, amarillo: 1, verde: 2 };
+  cards.sort((a, b) => order[a.color] - order[b.color]);
+
+  const fmtD = (d) => d === null ? '—' : `${d >= 0 ? '+' : ''}${d.toFixed(0)}%`;
+  const clsD = (d) => d === null ? '' : d >= 0 ? 'color:#166534' : 'color:#991b1b';
+
+  document.getElementById('ritmoResult').innerHTML = `
+    <div class="ritmo-grid">
+      ${cards.map(c => `
+        <div class="ritmo-card" onclick="goToRitmoProduct('${c.ncm}')">
+          <div class="ritmo-card-header">
+            <div class="ritmo-semaforo ${c.color}"></div>
+            <div class="ritmo-nombre">${c.nombre}</div>
+            <div class="ritmo-signal ${c.color}">${c.signal}</div>
+          </div>
+          <div class="ritmo-bars">
+            <div class="ritmo-bar-row">
+              <div class="ritmo-bar-label bold">Esta campaña</div>
+              <div class="ritmo-bar-bg"><div class="ritmo-bar-fill actual" style="width:${c.pctCur}%"></div></div>
+              <div class="ritmo-bar-val">${fmtTon(c.volCur)} ton</div>
+            </div>
+            <div class="ritmo-bar-row">
+              <div class="ritmo-bar-label">Campaña anterior</div>
+              <div class="ritmo-bar-bg"><div class="ritmo-bar-fill hist" style="width:${c.pctPrev}%"></div></div>
+              <div class="ritmo-bar-val">${fmtTon(c.volPrev)} ton</div>
+            </div>
+            <div class="ritmo-bar-row">
+              <div class="ritmo-bar-label">Prom. hist. 2022–23</div>
+              <div class="ritmo-bar-bg"><div class="ritmo-bar-fill" style="width:${c.pctHist}%;background:rgba(220,80,60,0.4)"></div></div>
+              <div class="ritmo-bar-val">${fmtTon(c.histVol)} ton</div>
+            </div>
+          </div>
+          <div class="ritmo-footer">
+            <div class="ritmo-stat">
+              <div class="rv">${fmtTon(c.ritmoCur)}</div>
+              <div class="rl">ton/mes actual</div>
+            </div>
+            <div class="ritmo-stat">
+              <div class="rv">${fmtTon(c.proyeccion)}</div>
+              <div class="rl">proyección cierre</div>
+            </div>
+            <div class="ritmo-stat">
+              <div class="rv" style="${clsD(c.proyDelta)}">${fmtD(c.proyDelta)}</div>
+              <div class="rl">vs campaña ant. completa</div>
+            </div>
+            <div class="ritmo-elapsed">${c.elapsedLabel}</div>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+function goToRitmoProduct(ncm) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-analysis').classList.add('active');
+  document.getElementById('tab-analysis').classList.add('active');
+  document.getElementById('filterProduct').value = ncm;
+  updateDestinations();
+  setTimeout(() => runAnalysis(), 50);
+}
+
+// ── DONDE ENTRAR ───────────────────────────────────────────────────────────
+function renderCaptura() {
+  const ncmFiltro   = document.getElementById('filterCapturaProduct')?.value || '';
+  const shareMax    = parseInt(document.getElementById('filterCapturaShare')?.value || '35');
+  const now         = new Date();
+  const nowKey      = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+  const capture = [];
+
+  Object.entries(IMPORTS_DB).forEach(([pais, ncmsImp]) => {
+    Object.entries(ncmsImp).forEach(([ncm, origenes]) => {
+      if (ncmFiltro && ncm !== ncmFiltro) return;
+      const cfg       = findConfig(ncm);
+      const nombre    = cfg ? cfg.nombre : ncm;
+      const mesInicio = cfg ? cfg.mes_inicio : 1;
+      const curYear   = getCurrentCampaignYear(mesInicio);
+      const curMonths = getCampaignMonths(mesInicio, curYear);
+      const prevMonths = getCampaignMonths(mesInicio, curYear - 1);
+      const elapsed   = curMonths.filter(m => m <= nowKey).length;
+      const curM      = curMonths.slice(0, elapsed);
+      const prevM     = prevMonths.slice(0, elapsed);
+
+      // Total importado esta campaña y anterior
+      let totalCur = 0, totalPrev = 0;
+      const origenCur = {}, origenPrev = {};
+      Object.entries(origenes).forEach(([orig, meses]) => {
+        const vc = curM.reduce((a,m)  => a + (meses[m] || 0), 0);
+        const vp = prevM.reduce((a,m) => a + (meses[m] || 0), 0);
+        origenCur[orig]  = vc;
+        origenPrev[orig] = vp;
+        totalCur  += vc;
+        totalPrev += vp;
+      });
+      if (totalCur === 0) return;
+
+      // Argentina en importaciones
+      const argImp   = origenCur['Argentina'] || 0;
+      const argShare = totalCur > 0 ? argImp / totalCur * 100 : 0;
+      if (argShare >= shareMax) return;
+
+      // Competidor dominante (sin Argentina)
+      const topComp = Object.entries(origenCur)
+        .filter(([o]) => !o.toLowerCase().includes('argentin'))
+        .sort((a,b) => b[1]-a[1])[0];
+      if (!topComp) return;
+
+      const compShare     = totalCur > 0 ? topComp[1] / totalCur * 100 : 0;
+      const gap           = topComp[1] - argImp;
+      if (gap < 100) return;
+
+      // Tendencia del mercado total
+      const mktDelta = totalPrev > 0 ? (totalCur - totalPrev) / totalPrev * 100 : null;
+
+      // Saturación
+      const satPct = totalPrev > 0 ? totalCur / totalPrev * 100 : 0;
+      const satLabel = satPct >= 100 ? '🔴 saturado'
+                     : satPct >= 75  ? '🟡 casi lleno'
+                     :                 '🟢 con espacio';
+
+      // Argentina exportaciones reales a ese país (desde DB)
+      const argExp = DB[ncm]?.[pais]
+        ? curM.reduce((a,m) => a + (DB[ncm][pais][m]?.vol || 0), 0)
+        : null;
+
+      capture.push({ pais, ncm, nombre, totalCur, totalPrev, argImp, argExp,
+                     argShare, topComp: topComp[0], compVol: topComp[1],
+                     compShare, gap, mktDelta, satLabel, satPct, elapsed });
+    });
+  });
+
+  if (capture.length === 0) {
+    document.getElementById('capturaResult').innerHTML = `
+      <div class="empty-state"><div class="icon">◎</div>
+        <p>${Object.keys(IMPORTS_DB).length === 0
+          ? 'Cargá importaciones de algún país en "Mercados mundiales"'
+          : 'No hay oportunidades con los filtros actuales — probá aumentar el umbral de share'}</p>
+      </div>`;
+    return;
+  }
+
+  // Ordenar por gap absoluto
+  capture.sort((a,b) => b.gap - a.gap);
+
+  const fmtD = d => d === null ? '' : `${d>=0?'+':''}${d.toFixed(0)}%`;
+  const clsD = d => d === null ? '' : d >= 0 ? 'color:#166534' : 'color:#991b1b';
+
+  document.getElementById('capturaResult').innerHTML = `
+    <div style="font-size:12px;color:#aaa;margin-bottom:16px">
+      ${capture.length} oportunidad${capture.length!==1?'es':''} encontrada${capture.length!==1?'s':''} 
+      en ${[...new Set(capture.map(r=>r.pais))].length} mercados con importaciones cargadas
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      ${capture.slice(0, 20).map(r => `
+        <div style="background:#fff;border:0.5px solid rgba(99,102,241,0.2);border-radius:10px;padding:18px 20px;cursor:pointer;transition:all 0.15s"
+             onmouseover="this.style.borderColor='rgba(99,102,241,0.5)';this.style.transform='translateY(-1px)'"
+             onmouseout="this.style.borderColor='rgba(99,102,241,0.2)';this.style.transform=''"
+             onclick="goToImports('${r.pais}','${r.ncm}')">
+
+          <div style="display:flex;align-items:flex-start;gap:16px">
+
+            <!-- Info principal -->
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                <span style="font-size:15px;font-weight:600">${r.pais}</span>
+                <span style="font-size:13px;color:#666">·</span>
+                <span style="font-size:13px;color:#666">${r.nombre}</span>
+                <span style="font-size:11px;padding:2px 7px;border-radius:4px;background:rgba(99,102,241,0.08);color:#6366f1;font-weight:500">${r.satLabel}</span>
+              </div>
+
+              <!-- Barra comparativa -->
+              <div style="margin-bottom:10px">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                  <span style="font-size:11px;color:#6366f1;font-weight:500;width:80px">Argentina</span>
+                  <div style="flex:1;height:10px;background:rgba(0,0,0,0.05);border-radius:5px;overflow:hidden">
+                    <div style="height:100%;border-radius:5px;background:#6366f1;width:${Math.max(r.argShare,0.5).toFixed(1)}%"></div>
+                  </div>
+                  <span style="font-size:12px;color:#6366f1;font-weight:600;width:48px;text-align:right">${r.argShare.toFixed(0)}%</span>
+                  <span style="font-size:11px;color:#aaa;width:60px">${fmtTon(r.argImp)} ton</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span style="font-size:11px;color:#999;width:80px">${r.topComp}</span>
+                  <div style="flex:1;height:10px;background:rgba(0,0,0,0.05);border-radius:5px;overflow:hidden">
+                    <div style="height:100%;border-radius:5px;background:rgba(0,0,0,0.2);width:${Math.min(r.compShare,100).toFixed(1)}%"></div>
+                  </div>
+                  <span style="font-size:12px;color:#666;font-weight:600;width:48px;text-align:right">${r.compShare.toFixed(0)}%</span>
+                  <span style="font-size:11px;color:#aaa;width:60px">${fmtTon(r.compVol)} ton</span>
+                </div>
+              </div>
+
+              <!-- Stats fila -->
+              <div style="display:flex;gap:20px;flex-wrap:wrap">
+                <div>
+                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:#aaa">Mercado total</div>
+                  <div style="font-size:13px;font-weight:500">${fmtTon(r.totalCur)} ton 
+                    <span style="${clsD(r.mktDelta)};font-size:11px">${fmtD(r.mktDelta)}</span>
+                  </div>
+                </div>
+                ${r.argExp !== null ? `<div>
+                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:#aaa">Arg. exportó</div>
+                  <div style="font-size:13px;font-weight:500">${fmtTon(r.argExp)} ton</div>
+                </div>` : ''}
+                <div>
+                  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:#aaa">${r.elapsed} meses campaña</div>
+                  <div style="font-size:13px;font-weight:500">${fmtTon(r.totalCur / r.elapsed)} ton/mes</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Gap destacado -->
+            <div style="text-align:right;flex-shrink:0;padding-left:16px;border-left:0.5px solid rgba(99,102,241,0.15)">
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:#aaa;margin-bottom:4px">Potencial</div>
+              <div style="font-size:28px;font-weight:700;color:#6366f1;line-height:1">+${fmtTon(r.gap)}</div>
+              <div style="font-size:11px;color:#aaa;margin-top:2px">ton si iguala a ${r.topComp}</div>
+            </div>
+
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+// ── OPORTUNIDADES ──────────────────────────────────────────────────────────
+function renderOpps() {
+  const ncmFiltro = document.getElementById('filterOppsProduct')?.value || '';
+  const ncms = ncmFiltro ? [ncmFiltro] : Object.keys(DB);
+
+  if (ncms.length === 0 || !ncms.some(n => DB[n])) {
+    document.getElementById('oppsResult').innerHTML = `
+      <div class="empty-state"><div class="icon">📈</div><p>No hay datos cargados todavía</p></div>`;
+    return;
+  }
+
+  const now    = new Date();
+  const nowKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const mNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+  const rows    = [];
+  const lost    = []; // compraron el año pasado, cero este año
+  let   totalCurAll = 0; // para participación relativa
+
+  ncms.forEach(ncm => {
+    if (!DB[ncm]) return;
+    const cfg        = findConfig(ncm);
+    const mesInicio  = cfg ? cfg.mes_inicio : 1;
+    const nombre     = cfg ? cfg.nombre : ncm;
+    const curYear    = getCurrentCampaignYear(mesInicio);
+    const curMonths  = getCampaignMonths(mesInicio, curYear);
+    const prevMonths = getCampaignMonths(mesInicio, curYear - 1);
+    const elapsed    = curMonths.filter(m => m <= nowKey).length;
+    const curM   = curMonths.slice(0, elapsed);
+    const prevM  = prevMonths.slice(0, elapsed);
+    const last3M = curM.slice(-3);
+    const last3P = prevM.slice(-3);
+
+    Object.keys(DB[ncm]).forEach(pais => {
+      const cur  = curM.reduce((a,m)  => a + (DB[ncm][pais]?.[m]?.vol || 0), 0);
+      const prev = prevM.reduce((a,m) => a + (DB[ncm][pais]?.[m]?.vol || 0), 0);
+
+      if (cur === 0 && prev === 0) return;
+
+      // Mercados perdidos: compraron antes, nada ahora
+      if (cur === 0 && prev > 0) {
+        lost.push({ pais, nombre, ncm, prev });
+        return;
+      }
+
+      if (prev === 0) return; // sin histórico, no comparar
+
+      totalCurAll += cur;
+
+      const delta    = (cur - prev) / prev * 100;
+      const deltaVol = cur - prev;
+
+      // Tendencia últimos 3 meses
+      const t3cur  = last3M.reduce((a,m) => a + (DB[ncm][pais]?.[m]?.vol || 0), 0);
+      const t3prev = last3P.reduce((a,m) => a + (DB[ncm][pais]?.[m]?.vol || 0), 0);
+      const trend  = t3prev > 0 ? (t3cur - t3prev) / t3prev * 100 : null;
+      const trendLabel = trend === null ? '' :
+        Math.abs(trend) < 5  ? '→ estable' :
+        trend > 20   ? '↑↑ acelerando' :
+        trend > 0    ? '↑ acelerando' :
+        trend < -20  ? '↓↓ frenando' : '↓ frenando';
+      const trendClass = trend === null ? 'neutral' :
+        trend > 5 ? 'up' : trend < -5 ? 'down' : 'neutral';
+
+      rows.push({ pais, nombre, ncm, cur, prev, delta, deltaVol, trend, trendLabel, trendClass });
+    });
+  });
+
+  // Recalcular totalCurAll para share
+  const growing  = rows.filter(r => r.deltaVol > 0).sort((a,b) => b.deltaVol - a.deltaVol).slice(0, 15);
+  const shrinking = rows.filter(r => r.deltaVol < 0).sort((a,b) => a.deltaVol - b.deltaVol).slice(0, 15);
+  const lostSorted = lost.sort((a,b) => b.prev - a.prev).slice(0, 8);
+
+  const renderRow = (r) => {
+    const dStr   = (r.delta >= 0 ? '+' : '') + r.delta.toFixed(0) + '%';
+    const dClass = r.delta >= 0 ? 'up' : 'down';
+    const volDiff = r.deltaVol >= 0 ? '+' + fmtTon(r.deltaVol) : '−' + fmtTon(Math.abs(r.deltaVol));
+    const share  = totalCurAll > 0 ? (r.cur / totalCurAll * 100).toFixed(0) : 0;
+    return `<div class="opp-row" onclick="goToCountryProduct('${r.pais}','${r.ncm}')">
+      <div style="flex:1;min-width:0">
+        <div class="opp-country">${r.pais} <span style="font-size:11px;color:#bbb;font-weight:400">${share}% del total</span></div>
+        <div class="opp-product">${r.nombre}</div>
+        ${r.trendLabel ? `<div class="opp-trend ${r.trendClass}">${r.trendLabel} últimos 3 meses</div>` : ''}
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div class="opp-delta ${dClass}">${volDiff} ton</div>
+        <div class="opp-vols">${dStr} · ${fmtTon(r.cur)} vs ${fmtTon(r.prev)}</div>
+      </div>
+    </div>`;
+  };
+
+  const renderLost = (r) => `
+    <div class="opp-row lost" onclick="goToCountryProduct('${r.pais}','${r.ncm}')">
+      <div style="flex:1;min-width:0">
+        <div class="opp-country">${r.pais}</div>
+        <div class="opp-product">${r.nombre}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div class="opp-delta down">0 ton</div>
+        <div class="opp-vols">tenía ${fmtTon(r.prev)} ton el año ant.</div>
+      </div>
+    </div>`;
+
+  document.getElementById('oppsResult').innerHTML = `
+    <div class="opps-grid">
+      <div>
+        <div class="opps-col-title up">▲ Creciendo</div>
+        ${growing.length ? growing.map(renderRow).join('') : '<div style="color:#aaa;font-size:13px;padding:16px 0">Sin mercados en crecimiento</div>'}
+      </div>
+      <div>
+        <div class="opps-col-title down">▼ Cayendo</div>
+        ${shrinking.length ? shrinking.map(renderRow).join('') : '<div style="color:#aaa;font-size:13px;padding:16px 0">Sin mercados en caída</div>'}
+      </div>
+    </div>
+    ${lostSorted.length ? `
+    <div style="margin-top:28px">
+      <div class="opps-col-title down" style="margin-bottom:12px">⚠ Mercados perdidos — compraron el año pasado, nada esta campaña</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px">
+        ${lostSorted.map(renderLost).join('')}
+      </div>
+    </div>` : ''}`;
+}
+
+function goToCountryProduct(pais, ncm) {
+  // Switch to country view and pre-select country
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-country').classList.add('active');
+  document.getElementById('tab-country').classList.add('active');
+  document.getElementById('filterCountry').value = pais;
+  renderCountry();
+}
+
+// ── POR MERCADO ────────────────────────────────────────────────────────────
+function renderCountry() {
+  const pais = document.getElementById('filterCountry').value;
+  if (!pais) {
+    document.getElementById('countryResult').innerHTML = `
+      <div class="empty-state"><div class="icon">🌍</div><p>Seleccioná un país para ver el detalle</p></div>`;
+    return;
+  }
+
+  const now    = new Date();
+  const nowKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const rows   = [];
+
+  Object.keys(DB).forEach(ncm => {
+    if (!DB[ncm][pais]) return;
+    const cfg       = findConfig(ncm);
+    const mesInicio = cfg ? cfg.mes_inicio : 1;
+    const nombre    = cfg ? cfg.nombre : ncm;
+    const curYear   = getCurrentCampaignYear(mesInicio);
+    const curMonths  = getCampaignMonths(mesInicio, curYear);
+    const prevMonths = getCampaignMonths(mesInicio, curYear - 1);
+    const elapsed    = curMonths.filter(m => m <= nowKey).length;
+    const curM  = curMonths.slice(0, elapsed);
+    const prevM = prevMonths.slice(0, elapsed);
+
+    const cur  = curM.reduce((a,m)  => a + (DB[ncm][pais]?.[m]?.vol || 0), 0);
+    const prev = prevM.reduce((a,m) => a + (DB[ncm][pais]?.[m]?.vol || 0), 0);
+    if (cur === 0 && prev === 0) return;
+
+    const delta = prev > 0 ? (cur - prev) / prev * 100 : null;
+    rows.push({ ncm, nombre, cur, prev, delta, mesInicio, curYear });
+  });
+
+  if (rows.length === 0) {
+    document.getElementById('countryResult').innerHTML = `
+      <div class="empty-state"><div class="icon">🌍</div><p>Sin datos para ${pais}</p></div>`;
+    return;
+  }
+
+  rows.sort((a,b) => b.cur - a.cur);
+  const maxVol = Math.max(...rows.map(r => Math.max(r.cur, r.prev)));
+
+  const totalCur  = rows.reduce((a,r) => a + r.cur, 0);
+  const totalPrev = rows.reduce((a,r) => a + r.prev, 0);
+  const totalDelta = totalPrev > 0 ? (totalCur - totalPrev) / totalPrev * 100 : null;
+  const totalClass = totalDelta === null ? 'neutral' : totalDelta >= 0 ? 'up' : 'down';
+  const totalStr   = totalDelta === null ? '—' : (totalDelta >= 0 ? '+' : '') + totalDelta.toFixed(1) + '%';
+
+  document.getElementById('countryResult').innerHTML = `
+    <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:20px;flex-wrap:wrap">
+      <h2 style="font-size:17px;font-weight:600">${pais}</h2>
+      <span style="font-size:13px;color:#666">${fmtTon(totalCur)} ton campaña actual</span>
+      <span class="k-delta ${totalClass}" style="font-size:13px;font-weight:500">${totalStr} vs mismo período anterior</span>
+    </div>
+    ${rows.map(r => {
+      const dClass = r.delta === null ? 'new' : r.delta >= 0 ? 'up' : 'down';
+      const dStr   = r.delta === null ? 'nuevo' : (r.delta >= 0 ? '+' : '') + r.delta.toFixed(0) + '%';
+      const pctCur  = maxVol > 0 ? r.cur  / maxVol * 100 : 0;
+      const pctPrev = maxVol > 0 ? r.prev / maxVol * 100 : 0;
+      return `
+      <div class="country-product-row" onclick="goToAnalysis('${r.ncm}','${pais}')">
+        <div class="cp-header">
+          <div>
+            <span class="cp-name">${r.nombre}</span>
+            <span class="cp-ncm">${r.ncm}</span>
+          </div>
+          <span class="cp-delta ${dClass}">${dStr}</span>
+        </div>
+        <div class="cp-bar-row">
+          <div class="cp-bar-label" style="color:#1a1a1a;font-weight:500">Campaña ${r.curYear}</div>
+          <div class="cp-bar-bg"><div class="cp-bar-fill cur" style="width:${pctCur.toFixed(1)}%"></div></div>
+          <div class="cp-bar-val">${fmtTon(r.cur)} ton</div>
+        </div>
+        <div class="cp-bar-row">
+          <div class="cp-bar-label">Campaña ${r.curYear-1}</div>
+          <div class="cp-bar-bg"><div class="cp-bar-fill prev" style="width:${pctPrev.toFixed(1)}%"></div></div>
+          <div class="cp-bar-val">${fmtTon(r.prev)} ton</div>
+        </div>
+      </div>`;
+    }).join('')}`;
+}
+
+function goToAnalysis(ncm, pais) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-analysis').classList.add('active');
+  document.getElementById('tab-analysis').classList.add('active');
+  document.getElementById('filterProduct').value = ncm;
+  updateDestinations();
+  setTimeout(() => {
+    document.getElementById('filterDest').value = pais;
+    runAnalysis();
+  }, 50);
+}
+
+function goToImports(pais, ncm) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-imports').classList.add('active');
+  document.getElementById('tab-imports').classList.add('active');
+  populateImportFilters();
+  setTimeout(() => {
+    document.getElementById('filterImportCountry').value = pais;
+    updateImportProducts();
+    setTimeout(() => {
+      document.getElementById('filterImportProduct').value = ncm;
+      runImportAnalysis();
+    }, 50);
+  }, 50);
+}
+
+function goToAnalysisFromImports(ncm, pais) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-analysis').classList.add('active');
+  document.getElementById('tab-analysis').classList.add('active');
+  document.getElementById('filterProduct').value = ncm;
+  updateDestinations();
+  setTimeout(() => {
+    document.getElementById('filterDest').value = pais;
+    runAnalysis();
+  }, 50);
+}
+
+// ── MERCADOS MUNDIALES (Importaciones) ─────────────────────────────────────
+// Datos en memoria: pais -> ncm -> origen -> mes -> vol
+let IMPORTS_DB = {};
+let importPendingToken = null;
+let importPendingData  = null;
+
+function handleImportDrop(e) {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) handleImportFile(f);
+}
+
+function handleImportFile(file) {
+  if (!file) return;
+  const pais = document.getElementById('importCountryInput').value.trim();
+  if (!pais) {
+    setImportStatus('error', 'Ingresá el nombre del país importador antes de subir el archivo.');
+    return;
+  }
+  setImportStatus('loading', `Leyendo importaciones de ${pais}...`);
+  document.getElementById('importPreview').style.display = 'none';
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb   = XLSX.read(e.target.result, { type: 'array', cellDates: false });
+      const wsName = wb.SheetNames.find(n => n.toLowerCase().includes('strade')) || wb.SheetNames[0];
+      const ws   = wb.Sheets[wsName];
+      const headerRow = XLSX.utils.sheet_to_json(ws, { header:1, raw:false })[0];
+      const dataRows  = XLSX.utils.sheet_to_json(ws, { header:1, raw:true });
+      dataRows[0] = headerRow;
+      parseImports(dataRows, pais, wsName, file.name);
+    } catch(err) {
+      setImportStatus('error', 'Error al leer el archivo: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function parseImports(rows, pais, wsName, filename) {
+  if (rows.length < 2) { setImportStatus('error', 'El archivo está vacío.'); return; }
+  const header = rows[0].map(h => String(h||'').trim().toLowerCase());
+
+  const findCol = (...kws) => {
+    for (const kw of kws) {
+      const i = header.findIndex(h => h.includes(kw));
+      if (i !== -1) return i;
+    }
+    return -1;
+  };
+
+  const iDate   = findCol('fecha');
+  const iNCM    = findCol('ncm');
+  const iOrigen = findCol('origen', 'país de origen', 'pais de origen', 'exportador');
+  const iVol    = findCol('cantidad3', 'cantidad', 'peso neto', 'toneladas');
+
+  const missing = [];
+  if (iDate   === -1) missing.push('fecha');
+  if (iNCM    === -1) missing.push('ncm');
+  if (iOrigen === -1) missing.push('origen / país de origen');
+  if (iVol    === -1) missing.push('cantidad / volumen');
+
+  if (missing.length) {
+    setImportStatus('error', `Columnas no encontradas: ${missing.join(', ')}. ¿Es la hoja correcta?`);
+    return;
+  }
+
+  let loaded = 0, skipped = 0;
+  const staged = {}; // ncm -> origen -> mes -> vol
+
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const fecha  = parseDate(r[iDate]);
+    const ncm    = normalizeNCM(String(r[iNCM]||''));
+    const origen = String(r[iOrigen]||'').trim();
+    const vol    = parseFloat(String(r[iVol]||'0').replace(',','.'));
+    if (!fecha || isNaN(fecha.getTime())) { skipped++; continue; }
+    const yr = fecha.getFullYear();
+    if (yr < 2010 || yr > 2035) { skipped++; continue; }
+    if (!ncm || !origen || isNaN(vol) || vol <= 0) { skipped++; continue; }
+    const mes = `${yr}-${String(fecha.getMonth()+1).padStart(2,'0')}`;
+    if (!staged[ncm]) staged[ncm] = {};
+    if (!staged[ncm][origen]) staged[ncm][origen] = {};
+    staged[ncm][origen][mes] = (staged[ncm][origen][mes] || 0) + vol;
+    loaded++;
+  }
+
+  if (loaded === 0) { setImportStatus('error', 'No se pudo procesar ninguna fila válida.'); return; }
+
+  // Store as pending
+  importPendingToken = Date.now();
+  importPendingData  = { pais, ncms: staged };
+
+  // Build preview
+  const ncms    = Object.keys(staged);
+  const origenes = new Set();
+  let totalVol = 0;
+  let minMes = 'z', maxMes = '';
+  ncms.forEach(ncm => Object.entries(staged[ncm]).forEach(([orig, meses]) => {
+    origenes.add(orig);
+    Object.entries(meses).forEach(([m,v]) => {
+      totalVol += v;
+      if (m < minMes) minMes = m;
+      if (m > maxMes) maxMes = m;
+    });
+  }));
+
+  setImportStatus('success', `${loaded.toLocaleString()} registros leídos de "${wsName}". Revisá el preview y confirmá.`);
+
+  document.getElementById('importPreview').style.display = 'block';
+  document.getElementById('importPreview').innerHTML = `
+    <div style="background:#f0fdf4;border:0.5px solid rgba(22,163,74,0.2);border-radius:10px;padding:16px 20px;margin-top:12px">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.06em;color:#166534;margin-bottom:12px;font-weight:500">
+        Preview — ${pais}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:16px">
+        <div><div style="font-size:20px;font-weight:600">${loaded.toLocaleString()}</div><div style="font-size:11px;color:#666">registros</div></div>
+        <div><div style="font-size:20px;font-weight:600">${ncms.length}</div><div style="font-size:11px;color:#666">productos NCM</div></div>
+        <div><div style="font-size:20px;font-weight:600">${origenes.size}</div><div style="font-size:11px;color:#666">países origen</div></div>
+        <div><div style="font-size:20px;font-weight:600">${fmtTon(totalVol)}</div><div style="font-size:11px;color:#666">ton totales</div></div>
+        <div><div style="font-size:14px;font-weight:600">${minMes} → ${maxMes}</div><div style="font-size:11px;color:#666">período</div></div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn" onclick="confirmImports()">✓ Confirmar y guardar</button>
+        <button class="btn" style="background:#f5f5f3;color:#1a1a1a;border:0.5px solid rgba(0,0,0,0.15)"
+                onclick="discardImports()">Descartar</button>
+      </div>
+    </div>`;
+}
+
+function confirmImports() {
+  if (!importPendingData) return;
+  const { pais, ncms } = importPendingData;
+
+  // Merge into IMPORTS_DB
+  if (!IMPORTS_DB[pais]) IMPORTS_DB[pais] = {};
+  Object.entries(ncms).forEach(([ncm, origs]) => {
+    if (!IMPORTS_DB[pais][ncm]) IMPORTS_DB[pais][ncm] = {};
+    Object.entries(origs).forEach(([orig, meses]) => {
+      if (!IMPORTS_DB[pais][ncm][orig]) IMPORTS_DB[pais][ncm][orig] = {};
+      Object.entries(meses).forEach(([m, v]) => {
+        IMPORTS_DB[pais][ncm][orig][m] = (IMPORTS_DB[pais][ncm][orig][m] || 0) + v;
+      });
+    });
+  });
+
+  importPendingToken = null;
+  importPendingData  = null;
+
+  document.getElementById('importPreview').style.display = 'none';
+  setImportStatus('success', `Datos de ${pais} guardados correctamente.`);
+  populateImportFilters();
+}
+
+function discardImports() {
+  importPendingToken = null;
+  importPendingData  = null;
+  document.getElementById('importPreview').style.display = 'none';
+  setImportStatus('loading', 'Carga descartada.');
+  setTimeout(() => { document.getElementById('importStatusBar').style.display = 'none'; }, 2000);
+}
+
+function setImportStatus(type, msg) {
+  const el = document.getElementById('importStatusBar');
+  el.className = 'status-bar ' + type;
+  el.style.display = 'flex';
+  const icon = type === 'loading' ? '<div class="spinner"></div>' : type === 'success' ? '✓' : '✕';
+  el.innerHTML = `<span>${icon}</span><span>${msg}</span>`;
+}
+
+function populateImportFilters() {
+  const paises = Object.keys(IMPORTS_DB).sort();
+  document.getElementById('filterImportCountry').innerHTML =
+    '<option value="">Seleccionar país...</option>' +
+    paises.map(p => `<option value="${p}">${p}</option>`).join('');
+  // Also refresh products if a country is already selected
+  if (document.getElementById('filterImportCountry').value) updateImportProducts();
+}
+
+function updateImportProducts() {
+  const pais = document.getElementById('filterImportCountry').value;
+  const el   = document.getElementById('filterImportProduct');
+  if (!pais || !IMPORTS_DB[pais]) {
+    el.innerHTML = '<option value="">Seleccionar producto...</option>';
+    return;
+  }
+  const ncms = Object.keys(IMPORTS_DB[pais]).sort();
+  el.innerHTML = '<option value="">Seleccionar producto...</option>' +
+    ncms.map(ncm => {
+      const cfg = findConfig(ncm);
+      return `<option value="${ncm}">${cfg ? cfg.nombre : ncm}</option>`;
+    }).join('');
+}
+
+function runImportAnalysis() {
+  const pais = document.getElementById('filterImportCountry').value;
+  const ncm  = document.getElementById('filterImportProduct').value;
+  if (!pais || !ncm) { alert('Seleccioná un país y un producto'); return; }
+
+  const paisData = IMPORTS_DB[pais]?.[ncm];
+  if (!paisData) {
+    document.getElementById('importResult').innerHTML =
+      '<div class="empty-state"><div class="icon">🌐</div><p>Sin datos para esa combinación</p></div>';
+    return;
+  }
+
+  const cfg       = findConfig(ncm);
+  const nombre    = cfg ? cfg.nombre : ncm;
+  const mesInicio = cfg ? cfg.mes_inicio : 1;
+  const now       = new Date();
+  const nowKey    = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const curYear   = getCurrentCampaignYear(mesInicio);
+  const curMonths  = getCampaignMonths(mesInicio, curYear);
+  const prevMonths = getCampaignMonths(mesInicio, curYear - 1);
+  const elapsed    = curMonths.filter(m => m <= nowKey).length;
+  const curM       = curMonths.slice(0, elapsed);
+  const prevM      = prevMonths.slice(0, elapsed);
+  const mNames     = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+  const origenes = Object.keys(paisData);
+
+  // Total mercado por mes
+  const totalCurByMes  = {};
+  const totalPrevByMes = {};
+  origenes.forEach(orig => {
+    curM.forEach(m  => { totalCurByMes[m]  = (totalCurByMes[m]  || 0) + (paisData[orig]?.[m]  || 0); });
+    prevM.forEach(m => { totalPrevByMes[m] = (totalPrevByMes[m] || 0) + (paisData[orig]?.[m]  || 0); });
+  });
+  const totalCur  = Object.values(totalCurByMes).reduce((a,b) => a+b, 0);
+  const totalPrev = Object.values(totalPrevByMes).reduce((a,b) => a+b, 0);
+
+  // Argentina dentro de ese mercado (desde DB principal)
+  const argCur  = curM.reduce((a,m)  => a + Object.values(DB[ncm]||{}).reduce((b,meses) => b + (meses?.[m]?.vol||0), 0), 0);
+  const argPrev = prevM.reduce((a,m) => a + Object.values(DB[ncm]||{}).reduce((b,meses) => {
+    // Mapear mes actual a mes del año anterior
+    const [yr, mo] = m.split('-');
+    const prevYrMes = `${parseInt(yr)-1}-${mo}`;
+    return b + (meses?.[prevYrMes]?.vol || 0);
+  }, 0), 0);
+
+  // Ritmo del mercado
+  const ritmoMercado = elapsed > 0 ? totalCur / elapsed : 0;
+  const proyMercado  = Math.round(ritmoMercado * 12);
+  const deltaMercado = totalPrev > 0 ? (totalCur - totalPrev) / totalPrev * 100 : null;
+
+  // Market share Argentina en el mercado de importaciones
+  const shareArg = totalCur > 0 && argCur > 0 ? argCur / totalCur * 100 : null;
+
+  // Semáforo de saturación
+  const pctLleno = totalPrev > 0 ? totalCur / totalPrev * 100 : 0;
+  let saturacion, satClass;
+  if (pctLleno >= 100)      { saturacion = '🔴 Mercado saturado — ya superó el volumen del año anterior'; satClass = 'down'; }
+  else if (pctLleno >= 75)  { saturacion = '🟡 Mercado casi completo — quedan pocos meses de ventana'; satClass = 'neutral'; }
+  else                       { saturacion = '🟢 Mercado con espacio — todavía hay lugar para entrar'; satClass = 'up'; }
+
+  // Top orígenes
+  const origenRank = origenes.map(orig => ({
+    orig,
+    cur:  curM.reduce((a,m)  => a + (paisData[orig]?.[m]  || 0), 0),
+    prev: prevM.reduce((a,m) => a + (paisData[orig]?.[m] || 0), 0),
+  })).sort((a,b) => b.cur - a.cur).slice(0, 10);
+
+  const maxOrig = origenRank[0]?.cur || 1;
+
+  // Chart data — total mercado por mes
+  const chartLabels = curMonths.map((m,i) =>
+    mNames[+m.split('-')[1]-1] + (i >= elapsed ? '*' : ''));
+  const chartCur  = curMonths.map(m => Object.values(totalCurByMes).length ? (totalCurByMes[m] || 0) : 0);
+  const chartPrev = prevMonths.map(m => totalPrevByMes[m.replace(/^\d+/, y => parseInt(y)+1)] || 0);
+
+  document.getElementById('importResult').innerHTML = `
+    <div class="comparison-header">
+      <h2>${pais} — ${nombre}</h2>
+      <span class="campaign-badge">Campaña ${curYear}–${curYear+1}</span>
+      <span class="campaign-badge">${elapsed} meses</span>
+      ${DB[ncm] ? `
+        <button onclick="goToAnalysisFromImports('${ncm}','${pais}')"
+          style="margin-left:auto;padding:5px 12px;border-radius:6px;border:0.5px solid rgba(0,0,0,0.15);
+                 background:#fff;font-size:12px;cursor:pointer;color:#1a1a1a;transition:all 0.15s"
+          onmouseover="this.style.background='#1a1a1a';this.style.color='#fff'"
+          onmouseout="this.style.background='#fff';this.style.color='#1a1a1a'">
+          📦 Ver exportaciones Argentina
+        </button>` : ''}
+    </div>
+
+    <div class="kpi-row">
+      <div class="kpi">
+        <div class="k-label">Total importado</div>
+        <div class="k-val">${fmtTon(totalCur)}<span style="font-size:14px;font-weight:400;color:#aaa"> ton</span></div>
+        <div class="k-sub">vs ${fmtTon(totalPrev)} ton mismo período anterior · proyección ${fmtTon(proyMercado)} ton</div>
+        <div class="k-delta ${deltaMercado===null?'neutral':deltaMercado>=0?'up':'down'}">
+          ${deltaMercado===null?'—':(deltaMercado>=0?'+':'')+deltaMercado.toFixed(1)+'% vs mismo período anterior'}
+        </div>
+      </div>
+      <div class="kpi">
+        <div class="k-label">Saturación del mercado</div>
+        <div class="k-val">${pctLleno.toFixed(0)}<span style="font-size:14px;font-weight:400;color:#aaa">%</span></div>
+        <div class="k-sub">del volumen histórico ya cubierto</div>
+        <div class="k-delta ${satClass}">${saturacion}</div>
+      </div>
+      <div class="kpi">
+        <div class="k-label">Argentina en este mercado</div>
+        <div class="k-val">${shareArg !== null ? shareArg.toFixed(1) + '%' : '—'}</div>
+        <div class="k-sub">${argCur > 0 ? fmtTon(argCur) + ' ton de ' + fmtTon(totalCur) + ' ton totales' : 'sin datos de exportación argentina cargados'}</div>
+        <div class="k-delta neutral">${argCur > 0 ? 'market share en importaciones de ' + pais : ''}</div>
+      </div>
+    </div>
+
+    <div class="chart-section">
+      <h3>Volumen total importado por ${pais} — campaña actual vs anterior</h3>
+      <div class="chart-wrap"><canvas id="importChart"></canvas></div>
+    </div>
+
+    <div class="table-section">
+      <h3>Orígenes — de dónde compra ${pais}</h3>
+      <table>
+        <thead><tr>
+          <th>País origen</th>
+          <th class="num">Actual (ton)</th>
+          <th class="num">Anterior (ton)</th>
+          <th class="num">Var.</th>
+          <th>Participación</th>
+        </tr></thead>
+        <tbody>
+          ${origenRank.map(r => {
+            const dlt  = r.prev > 0 ? (r.cur - r.prev) / r.prev * 100 : null;
+            const dc   = dlt === null ? 'new' : dlt >= 0 ? 'up' : 'down';
+            const dl   = dlt === null ? 'nuevo' : (dlt>=0?'+':'')+dlt.toFixed(0)+'%';
+            const pct  = totalCur > 0 ? r.cur / totalCur * 100 : 0;
+            const isArg = r.orig.toLowerCase().includes('argentin');
+            return `<tr style="${isArg?'background:#f0fdf4':''}" >
+              <td class="country">${r.orig}${isArg?' 🇦🇷':''}</td>
+              <td class="num">${fmtTon(r.cur)}</td>
+              <td class="num">${fmtTon(r.prev)}</td>
+              <td class="num"><span class="delta-pill ${dc}">${dl}</span></td>
+              <td><div class="bar-cell">
+                <div class="bar-bg"><div class="bar-fill" style="width:${(r.cur/maxOrig*100).toFixed(1)}%"></div></div>
+                <span style="font-size:11px;color:#aaa;min-width:32px">${pct.toFixed(0)}%</span>
+              </div></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+
+  // Chart
+  if (activeChart) activeChart.destroy();
+  const ctx = document.getElementById('importChart').getContext('2d');
+  activeChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: chartLabels,
+      datasets: [
+        { label: `Campaña ${curYear}`,  data: curMonths.map(m => totalCurByMes[m]||0),  backgroundColor:'rgba(26,26,26,0.85)', borderRadius:3 },
+        { label: `Campaña ${curYear-1}`, data: prevMonths.map(m => totalPrevByMes[m]||0), backgroundColor:'rgba(26,26,26,0.15)', borderRadius:3 }
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ labels:{ color:'#999', font:{size:11}, boxWidth:12 } } },
+      scales:{
+        x:{ grid:{color:'rgba(0,0,0,0.05)'}, ticks:{color:'#aaa',font:{size:11}} },
+        y:{ grid:{color:'rgba(0,0,0,0.05)'}, ticks:{color:'#aaa',font:{size:11},callback:v=>fmtTon(v)} }
+      }
+    }
+  });
+}
+
+// ── UTILS ──────────────────────────────────────────────────────────────────
+function fmtTon(v) {
+  if (v >= 1000000) return (v/1000000).toFixed(1) + 'M';
+  if (v >= 1000)    return (v/1000).toFixed(1) + 'k';
+  return Math.round(v).toLocaleString();
+}
+
+// Cargar datos desde el backend al arrancar
+window.addEventListener('DOMContentLoaded', async () => {
+  await loadDBIntoMemory();
+});
+</script>
+</body>
+</html>
