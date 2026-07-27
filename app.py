@@ -5,6 +5,8 @@ from datetime import datetime
 from contextlib import contextmanager
 from collections import defaultdict
 import pandas as pd
+from dotenv import load_dotenv
+load_dotenv()
 
 app = Flask(__name__)
 
