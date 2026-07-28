@@ -280,6 +280,21 @@ def confirm_upload(token):
     })
 
 
+@app.route("/api/test_insert")
+def test_insert():
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO softrade_exportaciones
+                    (identificador, item, ncm, pais, mes, vol, fob)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, ("TEST001", "1", "TEST", "TestPais", "2024-01", 100.0, 50.0))
+        return jsonify({"ok": True, "message": "Fila de test insertada correctamente"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/discard/<token>", methods=["POST"])
 def discard_upload(token):
     p = STAGING_DIR / f"{token}.json"
