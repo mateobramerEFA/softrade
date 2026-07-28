@@ -1,7 +1,6 @@
 import os
 import io
 import json
-import shutil
 import threading
 from pathlib import Path
 from datetime import datetime
@@ -17,11 +16,7 @@ load_dotenv()
 
 app = Flask(__name__)
 
-BASE_DIR    = Path(__file__).parent
-STAGING_DIR = BASE_DIR / "staging"
-JOBS_DIR    = BASE_DIR / "staging" / "jobs"
-STAGING_DIR.mkdir(parents=True, exist_ok=True)
-JOBS_DIR.mkdir(parents=True, exist_ok=True)
+BASE_DIR = Path(__file__).parent
 
 # ── Database ───────────────────────────────────────────────────────────────
 def _build_conn_str():
@@ -52,6 +47,49 @@ def get_db():
         raise
     finally:
         conn.close()
+
+# ── Staging en DB ──────────────────────────────────────────────────────────
+def save_staging(token, filename, sheet, rows):
+    data = json.dumps({"filename": filename, "sheet": sheet, "rows": rows})
+    with get_db() as conn:
+        conn.cursor().execute("""
+            INSERT INTO softrade_staging (token, filename, sheet, data, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (token, filename, sheet, data, datetime.now().isoformat()))
+
+def load_staging(token):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT data FROM softrade_staging WHERE token=?", (token,))
+        row = cur.fetchone()
+        if not row: return None
+        return json.loads(row[0])
+
+def delete_staging(token):
+    with get_db() as conn:
+        conn.cursor().execute("DELETE FROM softrade_staging WHERE token=?", (token,))
+
+# ── Jobs en DB ─────────────────────────────────────────────────────────────
+def save_job(job_id, status, **kwargs):
+    data = json.dumps({"status": status, "updated": datetime.now().isoformat(), **kwargs})
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM softrade_staging WHERE token=?", (job_id,))
+        if cur.fetchone():
+            cur.execute("UPDATE softrade_staging SET data=? WHERE token=?", (data, job_id))
+        else:
+            cur.execute("""
+                INSERT INTO softrade_staging (token, filename, sheet, data, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (job_id, '', '', data, datetime.now().isoformat()))
+
+def load_job(job_id):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT data FROM softrade_staging WHERE token=?", (job_id,))
+        row = cur.fetchone()
+        if not row: return None
+        return json.loads(row[0])
 
 # ── Validación ─────────────────────────────────────────────────────────────
 REQUIRED_COLS = {
@@ -105,31 +143,24 @@ def parse_rows(df, mapping):
             skipped += 1
     return rows, skipped
 
-# ── Job system ─────────────────────────────────────────────────────────────
-def save_job(job_id, status, **kwargs):
-    job = {"status": status, "updated": datetime.now().isoformat(), **kwargs}
-    (JOBS_DIR / f"{job_id}.json").write_text(json.dumps(job))
-
-def load_job(job_id):
-    p = JOBS_DIR / f"{job_id}.json"
-    if not p.exists(): return None
-    return json.loads(p.read_text())
-
-def run_confirm_job(job_id, staging_path_str):
+# ── Background job ─────────────────────────────────────────────────────────
+def run_confirm_job(job_id, token):
     try:
-        staging_path = Path(staging_path_str)
-        data = json.loads(staging_path.read_text())
+        save_job(job_id, "running", message="Cargando datos...")
+        data = load_staging(token)
+        if not data:
+            save_job(job_id, "error", error="Staging no encontrado.")
+            return
+
         rows = [(r["id"], r["item"], r["ncm"], r["pais"], r["mes"], r["vol"], r["fob"])
                 for r in data["rows"]]
 
-        save_job(job_id, "running", message="Conectando a la base de datos...")
+        save_job(job_id, "running", message=f"Insertando {len(rows)} filas en Azure SQL...")
 
         with get_db() as conn:
             cur = conn.cursor()
-            save_job(job_id, "running", message="Creando tabla temporal...")
-
             cur.execute("""
-                CREATE TABLE #staging (
+                CREATE TABLE #staging_upload (
                     identificador NVARCHAR(100),
                     item          NVARCHAR(50),
                     ncm           NVARCHAR(50),
@@ -139,15 +170,12 @@ def run_confirm_job(job_id, staging_path_str):
                     fob           FLOAT
                 )
             """)
-
-            save_job(job_id, "running", message=f"Cargando {len(rows)} filas...")
             cur.fast_executemany = True
-            cur.executemany("INSERT INTO #staging VALUES (?,?,?,?,?,?,?)", rows)
+            cur.executemany("INSERT INTO #staging_upload VALUES (?,?,?,?,?,?,?)", rows)
 
-            save_job(job_id, "running", message="Insertando en base de datos...")
             cur.execute("""
                 MERGE softrade_exportaciones AS target
-                USING #staging AS source
+                USING #staging_upload AS source
                 ON target.identificador = source.identificador
                 AND target.item = source.item
                 WHEN NOT MATCHED THEN
@@ -157,7 +185,7 @@ def run_confirm_job(job_id, staging_path_str):
             """)
             inserted   = cur.rowcount
             duplicates = len(rows) - inserted
-            cur.execute("DROP TABLE #staging")
+            cur.execute("DROP TABLE #staging_upload")
 
             meses = [r[4] for r in rows]
             cur.execute("""
@@ -169,15 +197,14 @@ def run_confirm_job(job_id, staging_path_str):
                   duplicates, min(meses), max(meses),
                   None, datetime.now().isoformat()))
 
-        staging_path.unlink()
+        delete_staging(token)
 
         with get_db() as conn:
             total = conn.cursor().execute(
                 "SELECT COUNT(*) FROM softrade_exportaciones"
             ).fetchone()[0]
 
-        save_job(job_id, "done",
-                 inserted=inserted, duplicates=duplicates, total_db=total)
+        save_job(job_id, "done", inserted=inserted, duplicates=duplicates, total_db=total)
 
     except Exception as e:
         save_job(job_id, "error", error=str(e))
@@ -241,9 +268,7 @@ def preview_upload():
     token   = datetime.now().strftime("%Y%m%d_%H%M%S")
     staging = [{"id": r[0], "item": r[1], "ncm": r[2], "pais": r[3],
                 "mes": r[4], "vol": r[5], "fob": r[6]} for r in rows]
-    (STAGING_DIR / f"{token}.json").write_text(
-        json.dumps({"filename": file.filename, "sheet": sheet_name, "rows": staging})
-    )
+    save_staging(token, file.filename, sheet_name, staging)
 
     by_ncm = defaultdict(lambda: {"vol": 0, "registros": 0, "paises": set()})
     meses  = set()
@@ -268,9 +293,8 @@ def preview_upload():
 
 @app.route("/api/confirm/<token>", methods=["POST"])
 def confirm_upload(token):
-    """Arranca el proceso en background y devuelve job_id inmediatamente."""
-    staging_path = STAGING_DIR / f"{token}.json"
-    if not staging_path.exists():
+    data = load_staging(token)
+    if not data:
         return jsonify({"error": "Token inválido o expirado."}), 404
 
     job_id = f"job_{token}"
@@ -278,7 +302,7 @@ def confirm_upload(token):
 
     t = threading.Thread(
         target=run_confirm_job,
-        args=(job_id, str(staging_path)),
+        args=(job_id, token),
         daemon=True
     )
     t.start()
@@ -288,17 +312,15 @@ def confirm_upload(token):
 
 @app.route("/api/job/<job_id>")
 def job_status(job_id):
-    """El browser pregunta acá cada 2 segundos para saber si terminó."""
     job = load_job(job_id)
     if not job:
-        return jsonify({"error": "Job no encontrado"}), 404
+        return jsonify({"status": "pending", "message": "Iniciando..."})
     return jsonify(job)
 
 
 @app.route("/api/discard/<token>", methods=["POST"])
 def discard_upload(token):
-    p = STAGING_DIR / f"{token}.json"
-    if p.exists(): p.unlink()
+    delete_staging(token)
     return jsonify({"ok": True})
 
 
@@ -364,21 +386,6 @@ def get_summary():
         if pais not in result[ncm]: result[ncm][pais] = {}
         result[ncm][pais][mes] = round(vol, 2)
     return jsonify({"data": result})
-
-
-@app.route("/api/test_insert")
-def test_insert():
-    try:
-        with get_db() as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO softrade_exportaciones
-                    (identificador, item, ncm, pais, mes, vol, fob)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, ("TEST001", "1", "TEST", "TestPais", "2024-01", 100.0, 50.0))
-        return jsonify({"ok": True, "message": "Test OK"})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 if __name__ == "__main__":
