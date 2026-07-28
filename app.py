@@ -188,15 +188,35 @@ def preview_upload():
         return jsonify({"error": "No se pudo procesar ninguna fila válida.",
                         "hint": f"{skipped} descartadas."}), 422
 
-    # Chequear duplicados
+    # Chequear duplicados en bloque usando tabla temporal
+    ids_to_check = [(r[0], r[1]) for r in rows]
+    existing = set()
     with get_db() as conn:
         cur = conn.cursor()
-        existing = set()
-        for r in rows:
-            cur.execute("SELECT 1 FROM softrade_exportaciones WHERE identificador=? AND item=?",
-                        (r[0], r[1]))
-            if cur.fetchone():
-                existing.add((r[0], r[1]))
+        # Crear tabla temporal con los IDs a chequear
+        cur.execute("""
+            CREATE TABLE #temp_check (
+                identificador NVARCHAR(100),
+                item NVARCHAR(50)
+            )
+        """)
+        batch_size = 500
+        for i in range(0, len(ids_to_check), batch_size):
+            batch = ids_to_check[i:i+batch_size]
+            placeholders = ",".join(["(?,?)"] * len(batch))
+            flat = [x for pair in batch for x in pair]
+            cur.execute(f"INSERT INTO #temp_check VALUES {placeholders}", flat)
+
+        cur.execute("""
+            SELECT e.identificador, e.item
+            FROM softrade_exportaciones e
+            INNER JOIN #temp_check t
+                ON e.identificador = t.identificador AND e.item = t.item
+        """)
+        for row in cur.fetchall():
+            existing.add((row[0], row[1]))
+
+        cur.execute("DROP TABLE #temp_check")
 
     new_rows  = [r for r in rows if (r[0], r[1]) not in existing]
     dup_count = len(existing)
@@ -251,16 +271,20 @@ def confirm_upload(token):
     inserted = 0
     with get_db() as conn:
         cur = conn.cursor()
-        for r in rows:
-            try:
-                cur.execute("""
-                    INSERT INTO softrade_exportaciones
-                        (identificador, item, ncm, pais, mes, vol, fob)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, r)
-                inserted += 1
-            except Exception:
-                pass
+        # Insertar en lotes de 500
+        batch_size = 500
+        for i in range(0, len(rows), batch_size):
+            batch = rows[i:i+batch_size]
+            for r in batch:
+                try:
+                    cur.execute("""
+                        INSERT INTO softrade_exportaciones
+                            (identificador, item, ncm, pais, mes, vol, fob)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, r)
+                    inserted += 1
+                except Exception:
+                    pass
 
         meses = [r[4] for r in rows] if rows else [""]
         cur.execute("""
