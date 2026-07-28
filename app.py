@@ -228,34 +228,46 @@ def confirm_upload(token):
     rows = [(r["id"], r["item"], r["ncm"], r["pais"], r["mes"], r["vol"], r["fob"])
             for r in data["rows"]]
 
-    inserted   = 0
-    duplicates = 0
+    if not rows:
+        staging_path.unlink()
+        return jsonify({"ok": True, "inserted": 0, "duplicates": 0, "total_db": 0})
 
     with get_db() as conn:
         cur = conn.cursor()
-        cur.fast_executemany = True
-        try:
-            cur.executemany("""
-                INSERT INTO softrade_exportaciones
-                    (identificador, item, ncm, pais, mes, vol, fob)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, rows)
-            inserted = len(rows)
-        except Exception:
-            # Si falla el batch, insertar uno a uno ignorando duplicados
-            cur.fast_executemany = False
-            for r in rows:
-                try:
-                    cur.execute("""
-                        INSERT INTO softrade_exportaciones
-                            (identificador, item, ncm, pais, mes, vol, fob)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, r)
-                    inserted += 1
-                except Exception:
-                    duplicates += 1
 
-        meses = [r[4] for r in rows] if rows else [""]
+        # Tabla temporal
+        cur.execute("""
+            CREATE TABLE #staging (
+                identificador NVARCHAR(100),
+                item          NVARCHAR(50),
+                ncm           NVARCHAR(50),
+                pais          NVARCHAR(100),
+                mes           NVARCHAR(7),
+                vol           FLOAT,
+                fob           FLOAT
+            )
+        """)
+
+        # Bulk insert a tabla temporal
+        cur.fast_executemany = True
+        cur.executemany("INSERT INTO #staging VALUES (?,?,?,?,?,?,?)", rows)
+
+        # MERGE: insertar solo los que no existen
+        cur.execute("""
+            MERGE softrade_exportaciones AS target
+            USING #staging AS source
+            ON target.identificador = source.identificador
+            AND target.item = source.item
+            WHEN NOT MATCHED THEN
+                INSERT (identificador, item, ncm, pais, mes, vol, fob)
+                VALUES (source.identificador, source.item, source.ncm,
+                        source.pais, source.mes, source.vol, source.fob);
+        """)
+        inserted = cur.rowcount
+        duplicates = len(rows) - inserted
+        cur.execute("DROP TABLE #staging")
+
+        meses = [r[4] for r in rows]
         cur.execute("""
             INSERT INTO softrade_cargas
                 (filename, sheet, registros, omitidos, duplicados,
