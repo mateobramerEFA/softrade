@@ -29,18 +29,13 @@ def _build_conn_str():
         if "=" in part:
             k, _, v = part.partition("=")
             params[k.strip()] = v.strip()
-
     server   = params.get("Server", params.get("Data Source", "")).replace("tcp:", "")
     database = params.get("Initial Catalog", params.get("Database", ""))
     uid      = params.get("Uid", params.get("User ID", ""))
     pwd      = params.get("Pwd", params.get("Password", ""))
-
     return (
         f"DRIVER={{ODBC Driver 18 for SQL Server}};"
-        f"SERVER={server};"
-        f"DATABASE={database};"
-        f"UID={uid};"
-        f"PWD={pwd};"
+        f"SERVER={server};DATABASE={database};UID={uid};PWD={pwd};"
         f"Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30"
     )
 
@@ -188,45 +183,12 @@ def preview_upload():
         return jsonify({"error": "No se pudo procesar ninguna fila válida.",
                         "hint": f"{skipped} descartadas."}), 422
 
-    # Chequear duplicados en bloque usando tabla temporal
-    ids_to_check = [(r[0], r[1]) for r in rows]
-    existing = set()
-    with get_db() as conn:
-        cur = conn.cursor()
-        # Crear tabla temporal con los IDs a chequear
-        cur.execute("""
-            CREATE TABLE #temp_check (
-                identificador NVARCHAR(100),
-                item NVARCHAR(50)
-            )
-        """)
-        batch_size = 500
-        for i in range(0, len(ids_to_check), batch_size):
-            batch = ids_to_check[i:i+batch_size]
-            placeholders = ",".join(["(?,?)"] * len(batch))
-            flat = [x for pair in batch for x in pair]
-            cur.execute(f"INSERT INTO #temp_check VALUES {placeholders}", flat)
-
-        cur.execute("""
-            SELECT e.identificador, e.item
-            FROM softrade_exportaciones e
-            INNER JOIN #temp_check t
-                ON e.identificador = t.identificador AND e.item = t.item
-        """)
-        for row in cur.fetchall():
-            existing.add((row[0], row[1]))
-
-        cur.execute("DROP TABLE #temp_check")
-
-    new_rows  = [r for r in rows if (r[0], r[1]) not in existing]
-    dup_count = len(existing)
-
+    # Guardar en staging — el confirm maneja los duplicados
     token   = datetime.now().strftime("%Y%m%d_%H%M%S")
     staging = [{"id": r[0], "item": r[1], "ncm": r[2], "pais": r[3],
-                "mes": r[4], "vol": r[5], "fob": r[6]} for r in new_rows]
+                "mes": r[4], "vol": r[5], "fob": r[6]} for r in rows]
     (STAGING_DIR / f"{token}.json").write_text(
-        json.dumps({"filename": file.filename, "sheet": sheet_name,
-                    "rows": staging, "duplicates": dup_count})
+        json.dumps({"filename": file.filename, "sheet": sheet_name, "rows": staging})
     )
 
     by_ncm = defaultdict(lambda: {"vol": 0, "registros": 0, "paises": set()})
@@ -245,8 +207,6 @@ def preview_upload():
         "filename":    file.filename,
         "loaded":      len(rows),
         "skipped":     skipped,
-        "new":         len(new_rows),
-        "duplicates":  dup_count,
         "period_from": min(meses),
         "period_to":   max(meses),
         "products":    len(by_ncm),
@@ -268,14 +228,23 @@ def confirm_upload(token):
     rows = [(r["id"], r["item"], r["ncm"], r["pais"], r["mes"], r["vol"], r["fob"])
             for r in data["rows"]]
 
-    inserted = 0
+    inserted   = 0
+    duplicates = 0
+
     with get_db() as conn:
         cur = conn.cursor()
-        # Insertar en lotes de 500
-        batch_size = 500
-        for i in range(0, len(rows), batch_size):
-            batch = rows[i:i+batch_size]
-            for r in batch:
+        cur.fast_executemany = True
+        try:
+            cur.executemany("""
+                INSERT INTO softrade_exportaciones
+                    (identificador, item, ncm, pais, mes, vol, fob)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, rows)
+            inserted = len(rows)
+        except Exception:
+            # Si falla el batch, insertar uno a uno ignorando duplicados
+            cur.fast_executemany = False
+            for r in rows:
                 try:
                     cur.execute("""
                         INSERT INTO softrade_exportaciones
@@ -284,7 +253,7 @@ def confirm_upload(token):
                     """, r)
                     inserted += 1
                 except Exception:
-                    pass
+                    duplicates += 1
 
         meses = [r[4] for r in rows] if rows else [""]
         cur.execute("""
@@ -293,7 +262,7 @@ def confirm_upload(token):
                  periodo_from, periodo_to, snapshot, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (data["filename"], data["sheet"], inserted, 0,
-              data.get("duplicates", 0), min(meses), max(meses),
+              duplicates, min(meses), max(meses),
               None, datetime.now().isoformat()))
 
     staging_path.unlink()
@@ -303,9 +272,12 @@ def confirm_upload(token):
             "SELECT COUNT(*) FROM softrade_exportaciones"
         ).fetchone()[0]
 
-    return jsonify({"ok": True, "inserted": inserted,
-                    "duplicates": data.get("duplicates", 0),
-                    "total_db": total})
+    return jsonify({
+        "ok":         True,
+        "inserted":   inserted,
+        "duplicates": duplicates,
+        "total_db":   total
+    })
 
 
 @app.route("/api/discard/<token>", methods=["POST"])
