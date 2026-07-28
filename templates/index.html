@@ -566,34 +566,62 @@ function showPreview(data) {
 async function confirmUpload(btn) {
   if (!pendingToken) return;
   btn.disabled    = true;
-  btn.textContent = 'Guardando...';
+  btn.textContent = 'Iniciando...';
 
   try {
     const res  = await fetch(`${API_BASE}/api/confirm/${pendingToken}`, { method: 'POST' });
     const data = await res.json();
 
-    if (data.ok) {
-      const total = data.inserted + data.duplicates;
-      const msg = data.inserted === 0
-        ? `✓ Sin filas nuevas — ${data.duplicates} ya estaban en la base de datos.`
-        : data.duplicates > 0
-          ? `✓ ${data.inserted} filas nuevas guardadas. ${data.duplicates} ya existían.`
-          : `✓ ${data.inserted} filas guardadas correctamente.`;
-      setStatus('success', msg);
-      pendingToken = null;
-      document.getElementById('previewBar').style.display = 'none';
-      await loadDBIntoMemory();
-    } else {
-      setStatus('error', data.error || 'Error al guardar.');
+    if (!data.ok) {
+      setStatus('error', data.error || 'Error al iniciar la carga.');
       btn.disabled    = false;
       btn.textContent = '✓ Guardar en base de datos';
+      return;
     }
+
+    pendingToken = null;
+    document.getElementById('previewBar').style.display = 'none';
+
+    const jobId = data.job_id;
+    setStatus('loading', 'Guardando en base de datos...');
+
+    const poll = setInterval(async () => {
+      try {
+        const jr  = await fetch(`${API_BASE}/api/job/${jobId}`);
+        const job = await jr.json();
+
+        if (job.status === 'done') {
+          clearInterval(poll);
+          const msg = job.duplicates > 0
+            ? `✓ ${job.inserted} filas nuevas guardadas. ${job.duplicates} ya existían.`
+            : `✓ ${job.inserted} filas guardadas correctamente.`;
+          setStatus('success', msg);
+          await loadDBIntoMemory();
+          btn.disabled    = false;
+          btn.textContent = '✓ Guardar en base de datos';
+        } else if (job.status === 'error') {
+          clearInterval(poll);
+          setStatus('error', `Error: ${job.error}`);
+          btn.disabled    = false;
+          btn.textContent = '✓ Guardar en base de datos';
+        } else {
+          setStatus('loading', job.message || 'Procesando...');
+        }
+      } catch(e) {
+        clearInterval(poll);
+        setStatus('error', 'Error al verificar el estado de la carga.');
+        btn.disabled    = false;
+        btn.textContent = '✓ Guardar en base de datos';
+      }
+    }, 2000);
+
   } catch(err) {
     setStatus('error', 'Error de conexión al confirmar.');
     btn.disabled    = false;
     btn.textContent = '✓ Guardar en base de datos';
   }
 }
+
 
 async function discardUpload() {
   if (pendingToken) {
