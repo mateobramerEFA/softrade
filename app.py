@@ -1,142 +1,60 @@
-from flask import Flask, request, jsonify, render_template
-import io, json, shutil, os
+import os
+import io
+import json
+import shutil
 from pathlib import Path
 from datetime import datetime
 from contextlib import contextmanager
 from collections import defaultdict
+
 import pandas as pd
+import pyodbc
 from dotenv import load_dotenv
+from flask import Flask, request, jsonify, render_template
+
 load_dotenv()
 
 app = Flask(__name__)
 
-# ── Config ─────────────────────────────────────────────────────────────────
-CONN_STR    = os.environ.get('AZURE_SQL_CONN_STR', '')
-USE_SQLITE  = not CONN_STR  # fallback local si no hay Azure SQL
-
+# ── Paths ──────────────────────────────────────────────────────────────────
 BASE_DIR    = Path(__file__).parent
-DATA_DIR    = BASE_DIR / "data"
-SNAP_DIR    = DATA_DIR / "snapshots"
 STAGING_DIR = BASE_DIR / "staging"
-DB_PATH     = DATA_DIR / "penta.db"
-
-for d in [DATA_DIR, SNAP_DIR, STAGING_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
+STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Database ───────────────────────────────────────────────────────────────
+def _build_conn_str():
+    ado = os.environ["AZURE_SQL_CONN_STR"]
+    params = {}
+    for part in ado.split(";"):
+        if "=" in part:
+            k, _, v = part.partition("=")
+            params[k.strip()] = v.strip()
+
+    server   = params.get("Server", params.get("Data Source", "")).replace("tcp:", "")
+    database = params.get("Initial Catalog", params.get("Database", ""))
+    uid      = params.get("Uid", params.get("User ID", ""))
+    pwd      = params.get("Pwd", params.get("Password", ""))
+
+    return (
+        f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+        f"SERVER={server};"
+        f"DATABASE={database};"
+        f"UID={uid};"
+        f"PWD={pwd};"
+        f"Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30"
+    )
+
 @contextmanager
-def db():
-    if USE_SQLITE:
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-    else:
-        import pyodbc
-        conn = pyodbc.connect(CONN_STR)
-        conn.autocommit = False
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-
-def placeholder(n=1):
-    """? para SQLite, ? también para pyodbc — ambos usan ?"""
-    return ','.join(['?' for _ in range(n)])
-
-def rows_to_dict(rows):
-    """Convierte rows de sqlite3.Row o pyodbc.Row a lista de dicts."""
-    if not rows:
-        return []
-    if hasattr(rows[0], 'keys'):
-        return [dict(r) for r in rows]
-    # pyodbc — usar cursor.description
-    return rows
-
-def init_db():
-    with db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            IF NOT EXISTS (
-                SELECT * FROM sysobjects
-                WHERE name='softrade_exportaciones' AND xtype='U'
-            )
-            CREATE TABLE softrade_exportaciones (
-                identificador NVARCHAR(100) NOT NULL,
-                item          NVARCHAR(50)  NOT NULL,
-                ncm           NVARCHAR(50)  NOT NULL,
-                pais          NVARCHAR(100) NOT NULL,
-                mes           NVARCHAR(7)   NOT NULL,
-                vol           FLOAT         NOT NULL,
-                fob           FLOAT         NOT NULL DEFAULT 0,
-                PRIMARY KEY (identificador, item)
-            )
-        """ if not USE_SQLITE else """
-            CREATE TABLE IF NOT EXISTS softrade_exportaciones (
-                identificador TEXT NOT NULL,
-                item          TEXT NOT NULL,
-                ncm           TEXT NOT NULL,
-                pais          TEXT NOT NULL,
-                mes           TEXT NOT NULL,
-                vol           REAL NOT NULL CHECK(vol > 0),
-                fob           REAL NOT NULL DEFAULT 0,
-                PRIMARY KEY (identificador, item)
-            )
-        """)
-
-        cursor.execute("""
-            IF NOT EXISTS (
-                SELECT * FROM sysobjects
-                WHERE name='softrade_cargas' AND xtype='U'
-            )
-            CREATE TABLE softrade_cargas (
-                id           INT IDENTITY(1,1) PRIMARY KEY,
-                filename     NVARCHAR(255) NOT NULL,
-                sheet        NVARCHAR(100) NOT NULL,
-                registros    INT           NOT NULL,
-                omitidos     INT           NOT NULL DEFAULT 0,
-                duplicados   INT           NOT NULL DEFAULT 0,
-                periodo_from NVARCHAR(7),
-                periodo_to   NVARCHAR(7),
-                snapshot     NVARCHAR(255),
-                timestamp    NVARCHAR(50)  NOT NULL
-            )
-        """ if not USE_SQLITE else """
-            CREATE TABLE IF NOT EXISTS softrade_cargas (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename     TEXT NOT NULL,
-                sheet        TEXT NOT NULL,
-                registros    INT  NOT NULL,
-                omitidos     INT  NOT NULL DEFAULT 0,
-                duplicados   INT  NOT NULL DEFAULT 0,
-                periodo_from TEXT,
-                periodo_to   TEXT,
-                snapshot     TEXT,
-                timestamp    TEXT NOT NULL
-            )
-        """)
-
-        # Índices — solo SQLite los necesita explícitos
-        if USE_SQLITE:
-            cursor.executescript("""
-                CREATE INDEX IF NOT EXISTS idx_exp_ncm_mes  ON softrade_exportaciones(ncm, mes);
-                CREATE INDEX IF NOT EXISTS idx_exp_pais_mes ON softrade_exportaciones(pais, mes);
-                CREATE INDEX IF NOT EXISTS idx_exp_ncm_pais ON softrade_exportaciones(ncm, pais);
-            """)
-
-init_db()
+def get_db():
+    conn = pyodbc.connect(_build_conn_str())
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 # ── Validación ─────────────────────────────────────────────────────────────
 REQUIRED_COLS = {
@@ -205,14 +123,6 @@ def parse_rows(df, mapping):
             skipped += 1
     return rows, skipped
 
-def snapshot_db(label):
-    if not USE_SQLITE or not DB_PATH.exists():
-        return None
-    ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-    name = f"penta_{ts}_{label}.db"
-    shutil.copy2(DB_PATH, SNAP_DIR / name)
-    return name
-
 # ── Frontend ───────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
@@ -221,16 +131,15 @@ def index():
 # ── API ────────────────────────────────────────────────────────────────────
 @app.route("/api/status")
 def status():
-    with db() as conn:
+    with get_db() as conn:
         cur = conn.cursor()
         records  = cur.execute("SELECT COUNT(*) FROM softrade_exportaciones").fetchone()[0]
         products = cur.execute("SELECT COUNT(DISTINCT ncm) FROM softrade_exportaciones").fetchone()[0]
         markets  = cur.execute("SELECT COUNT(DISTINCT pais) FROM softrade_exportaciones").fetchone()[0]
         period   = cur.execute("SELECT MIN(mes), MAX(mes) FROM softrade_exportaciones").fetchone()
-        cur.execute("SELECT TOP 10 * FROM softrade_cargas ORDER BY timestamp DESC" if not USE_SQLITE
-                    else "SELECT * FROM softrade_cargas ORDER BY timestamp DESC LIMIT 10")
-        uploads  = [dict(zip([d[0] for d in cur.description], row)) for row in cur.fetchall()]
-        snaps    = sorted([f.name for f in SNAP_DIR.glob("*.db")], reverse=True)[:10] if USE_SQLITE else []
+        cur.execute("SELECT TOP 10 * FROM softrade_cargas ORDER BY timestamp DESC")
+        cols    = [d[0] for d in cur.description]
+        uploads = [dict(zip(cols, row)) for row in cur.fetchall()]
 
     return jsonify({
         "records":     records,
@@ -239,8 +148,7 @@ def status():
         "period_from": period[0],
         "period_to":   period[1],
         "uploads":     uploads,
-        "snapshots":   snaps,
-        "backend":     "sqlite" if USE_SQLITE else "azure_sql",
+        "backend":     "azure_sql",
     })
 
 
@@ -277,14 +185,16 @@ def preview_upload():
 
     rows, skipped = parse_rows(raw, mapping)
     if not rows:
-        return jsonify({"error": "No se pudo procesar ninguna fila válida.", "hint": f"{skipped} descartadas."}), 422
+        return jsonify({"error": "No se pudo procesar ninguna fila válida.",
+                        "hint": f"{skipped} descartadas."}), 422
 
-    # Chequear duplicados contra la DB
-    with db() as conn:
+    # Chequear duplicados
+    with get_db() as conn:
         cur = conn.cursor()
         existing = set()
         for r in rows:
-            cur.execute("SELECT 1 FROM softrade_exportaciones WHERE identificador=? AND item=?", (r[0], r[1]))
+            cur.execute("SELECT 1 FROM softrade_exportaciones WHERE identificador=? AND item=?",
+                        (r[0], r[1]))
             if cur.fetchone():
                 existing.add((r[0], r[1]))
 
@@ -308,22 +218,22 @@ def preview_upload():
         meses.add(r[4])
 
     return jsonify({
-        "ok":           True,
-        "token":        token,
-        "sheet":        sheet_name,
-        "sheets":       wb.sheet_names,
-        "filename":     file.filename,
-        "loaded":       len(rows),
-        "skipped":      skipped,
-        "new":          len(new_rows),
-        "duplicates":   dup_count,
-        "period_from":  min(meses),
-        "period_to":    max(meses),
-        "products":     len(by_ncm),
-        "markets":      len({r[3] for r in rows}),
-        "by_ncm":       [{"ncm": k, "vol_total": round(v["vol"], 1),
-                          "registros": v["registros"], "paises": len(v["paises"])}
-                         for k, v in by_ncm.items()],
+        "ok":          True,
+        "token":       token,
+        "sheet":       sheet_name,
+        "sheets":      wb.sheet_names,
+        "filename":    file.filename,
+        "loaded":      len(rows),
+        "skipped":     skipped,
+        "new":         len(new_rows),
+        "duplicates":  dup_count,
+        "period_from": min(meses),
+        "period_to":   max(meses),
+        "products":    len(by_ncm),
+        "markets":     len({r[3] for r in rows}),
+        "by_ncm":      [{"ncm": k, "vol_total": round(v["vol"], 1),
+                         "registros": v["registros"], "paises": len(v["paises"])}
+                        for k, v in by_ncm.items()],
         "columns_mapped": mapping,
     })
 
@@ -338,10 +248,8 @@ def confirm_upload(token):
     rows = [(r["id"], r["item"], r["ncm"], r["pais"], r["mes"], r["vol"], r["fob"])
             for r in data["rows"]]
 
-    snap = snapshot_db("pre_upload")
-
     inserted = 0
-    with db() as conn:
+    with get_db() as conn:
         cur = conn.cursor()
         for r in rows:
             try:
@@ -352,7 +260,7 @@ def confirm_upload(token):
                 """, r)
                 inserted += 1
             except Exception:
-                pass  # duplicado — ignorar
+                pass
 
         meses = [r[4] for r in rows] if rows else [""]
         cur.execute("""
@@ -362,15 +270,18 @@ def confirm_upload(token):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (data["filename"], data["sheet"], inserted, 0,
               data.get("duplicates", 0), min(meses), max(meses),
-              snap, datetime.now().isoformat()))
+              None, datetime.now().isoformat()))
 
     staging_path.unlink()
 
-    with db() as conn:
-        total = conn.cursor().execute("SELECT COUNT(*) FROM softrade_exportaciones").fetchone()[0]
+    with get_db() as conn:
+        total = conn.cursor().execute(
+            "SELECT COUNT(*) FROM softrade_exportaciones"
+        ).fetchone()[0]
 
     return jsonify({"ok": True, "inserted": inserted,
-                    "duplicates": data.get("duplicates", 0), "total_db": total, "snapshot": snap})
+                    "duplicates": data.get("duplicates", 0),
+                    "total_db": total})
 
 
 @app.route("/api/discard/<token>", methods=["POST"])
@@ -380,23 +291,9 @@ def discard_upload(token):
     return jsonify({"ok": True})
 
 
-@app.route("/api/rollback/<snapshot_name>", methods=["POST"])
-def rollback(snapshot_name):
-    if not USE_SQLITE:
-        return jsonify({"error": "Rollback solo disponible en modo local."}), 400
-    snap_path = SNAP_DIR / snapshot_name
-    if not snap_path.exists():
-        return jsonify({"error": f"Snapshot '{snapshot_name}' no encontrado."}), 404
-    snapshot_db("pre_rollback")
-    shutil.copy2(snap_path, DB_PATH)
-    with db() as conn:
-        total = conn.cursor().execute("SELECT COUNT(*) FROM softrade_exportaciones").fetchone()[0]
-    return jsonify({"ok": True, "restored": snapshot_name, "records": total})
-
-
 @app.route("/api/products")
 def get_products():
-    with db() as conn:
+    with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT DISTINCT ncm FROM softrade_exportaciones ORDER BY ncm")
         rows = cur.fetchall()
@@ -405,10 +302,12 @@ def get_products():
 
 @app.route("/api/markets/<ncm>")
 def get_markets(ncm):
-    with db() as conn:
+    with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT DISTINCT pais FROM softrade_exportaciones WHERE ncm=? ORDER BY pais",
-                    (ncm.upper(),))
+        cur.execute(
+            "SELECT DISTINCT pais FROM softrade_exportaciones WHERE ncm=? ORDER BY pais",
+            (ncm.upper(),)
+        )
         rows = cur.fetchall()
     return jsonify({"markets": [r[0] for r in rows]})
 
@@ -416,7 +315,7 @@ def get_markets(ncm):
 @app.route("/api/data/<ncm>")
 def get_data(ncm):
     pais = request.args.get("pais")
-    with db() as conn:
+    with get_db() as conn:
         cur = conn.cursor()
         if pais:
             cur.execute("""
@@ -444,7 +343,7 @@ def get_data(ncm):
 
 @app.route("/api/summary")
 def get_summary():
-    with db() as conn:
+    with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
             SELECT ncm, pais, mes, SUM(vol) as vol
@@ -464,4 +363,4 @@ def get_summary():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=False)
