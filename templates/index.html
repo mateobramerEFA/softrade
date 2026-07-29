@@ -503,7 +503,7 @@ function handleFile(file) {
 }
 
 async function sendPreview(file, sheet) {
-  // Procesar localmente en el browser — rápido, sin mandar al servidor
+  // Todo local en el browser — no se manda el Excel al servidor
   try {
     const buffer = await file.arrayBuffer();
     const wb     = XLSX.read(buffer, { type: 'array', cellDates: false });
@@ -552,13 +552,15 @@ function parseRowsLocal(rows, wsName) {
     return -1;
   };
 
-  const iId   = findCol('identificador');
-  const iItem = findCol('item');
-  const iDate = findCol('fecha');
-  const iNCM  = findCol('ncm');
-  const iPais = findCol('país de destino', 'pais de destino', 'destino', 'país', 'pais');
-  const iVol  = findCol('cantidad3', 'cantidad');
-  const iFOB  = findCol('fob u', 'u$s fob', 'fob');
+  const iId          = findCol('identificador');
+  const iItem        = findCol('item');
+  const iDate        = findCol('fecha');
+  const iNCM         = findCol('ncm');
+  const iPais        = findCol('país de destino', 'pais de destino', 'destino', 'país', 'pais');
+  const iVol         = findCol('cantidad3', 'cantidad');
+  const iFOB         = findCol('fob u', 'u$s fob', 'fob');
+  const iAduana      = findCol('aduana');
+  const iExportador  = findCol('exportador');
 
   if (iDate === -1 || iNCM === -1 || iPais === -1 || iVol === -1) {
     setStatus('error', `Columnas no encontradas en "${wsName}". ¿Es la hoja correcta?`);
@@ -591,8 +593,24 @@ function parseRowsLocal(rows, wsName) {
     const yr = fecha.getFullYear();
     if (yr < 2010 || yr > 2035) { skipped++; continue; }
 
-    const id   = iId   !== -1 ? String(r[iId]   || '').trim() : String(i);
-    const item = iItem !== -1 ? String(r[iItem]  || '').trim() : '1';
+    // Si identificador es "No disponible" o vacío, generar hash de los campos clave
+    let id   = iId   !== -1 ? String(r[iId]   || '').trim() : '';
+    let item = iItem !== -1 ? String(r[iItem]  || '').trim() : '1';
+    if (!id || id.toLowerCase() === 'no disponible' || id.toLowerCase() === 'nan') {
+      // Hash simple y determinístico basado en los campos clave
+      const raw_fecha = r[iDate] ? String(r[iDate]) : '';
+      const raw_ncm   = String(r[iNCM]  || '');
+      const raw_pais  = String(r[iPais] || '');
+      const raw_vol   = String(r[iVol]  || '');
+      const raw_fob   = iFOB !== -1 ? String(r[iFOB] || '0') : '0';
+      const raw_aduana    = iAduana    !== -1 ? String(r[iAduana]    || '') : '';
+      const raw_exportador = iExportador !== -1 ? String(r[iExportador] || '') : '';
+      const hashStr   = `${raw_fecha}|${raw_ncm}|${raw_pais}|${raw_vol}|${raw_fob}|${raw_aduana}|${raw_exportador}`;
+      id   = 'GEN_' + hashStr.split('').reduce((a,c) => (((a<<5)-a)+c.charCodeAt(0))|0, 0).toString(36).replace('-','N');
+      item = '1';
+    } else if (id === String(i)) {
+      id = String(i);
+    }
     const ncm  = String(r[iNCM]  || '').replace(/[\.\-\s]/g,'').toUpperCase().trim();
     const pais = String(r[iPais] || '').trim();
     const vol  = parseFloat(String(r[iVol] || '0').replace(',','.'));

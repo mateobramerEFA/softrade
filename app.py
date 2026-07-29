@@ -60,6 +60,8 @@ REQUIRED_COLS = {
     "pais":          ["país de destino", "pais de destino", "destino", "país", "pais"],
     "vol":           ["cantidad3", "cantidad"],
     "fob":           ["fob u", "u$s fob", "fob"],
+    "aduana":        ["aduana"],
+    "exportador":    ["exportador"],
 }
 
 def find_col(columns, *keywords):
@@ -76,7 +78,7 @@ def validate_columns(df):
         found = find_col(cols, *aliases)
         if found:
             mapping[field] = found
-        elif field not in ("fob", "item"):
+        elif field not in ("fob", "item", "aduana", "exportador"):
             errors.append({"field": field, "aliases": aliases,
                            "message": f"No se encontró '{field}'. Se buscó: {', '.join(aliases)}"})
     return mapping, errors
@@ -84,20 +86,35 @@ def validate_columns(df):
 def normalize_ncm(raw):
     return str(raw).replace(".", "").replace("-", "").replace(" ", "").upper().strip()
 
+def generate_id(identificador, item, fecha, ncm, pais, vol, fob, aduana='', exportador=''):
+    """Genera un ID determinístico cuando el identificador no está disponible."""
+    id_val = str(identificador or '').strip()
+    if not id_val or id_val.lower() in ('no disponible', 'nan', 'none', ''):
+        import hashlib
+        raw = f"{fecha}|{ncm}|{pais}|{vol}|{fob}|{aduana}|{exportador}"
+        hash_val = hashlib.md5(raw.encode()).hexdigest()[:16]
+        return f"GEN_{hash_val}", "1"
+    return id_val, str(item or '1').strip()
+
 def parse_rows(df, mapping):
     rows, skipped = [], 0
     for idx, r in df.iterrows():
         try:
             fecha = pd.to_datetime(r[mapping["fecha"]], dayfirst=True)
             if not (2010 <= fecha.year <= 2035): skipped += 1; continue
-            identificador = str(r[mapping["identificador"]]).strip() if mapping.get("identificador") else str(idx)
-            item  = str(r[mapping["item"]]).strip() if mapping.get("item") else "1"
             ncm   = normalize_ncm(str(r[mapping["ncm"]]))
             pais  = str(r[mapping["pais"]]).strip()
             vol   = float(r[mapping["vol"]])
             fob   = float(r[mapping["fob"]]) if mapping.get("fob") and pd.notna(r.get(mapping["fob"])) else 0.0
             mes   = f"{fecha.year}-{fecha.month:02d}"
             if not ncm or not pais or vol <= 0: skipped += 1; continue
+
+            raw_id      = r[mapping["identificador"]] if mapping.get("identificador") else None
+            raw_item    = r[mapping["item"]] if mapping.get("item") else None
+            aduana      = str(r[mapping["aduana"]]).strip() if mapping.get("aduana") else ''
+            exportador  = str(r[mapping["exportador"]]).strip() if mapping.get("exportador") else ''
+            identificador, item = generate_id(raw_id, raw_item, fecha.date(), ncm, pais, vol, fob, aduana, exportador)
+
             rows.append((identificador, item, ncm, pais, mes, vol, fob))
         except Exception:
             skipped += 1
