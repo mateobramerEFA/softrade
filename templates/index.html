@@ -503,39 +503,169 @@ function handleFile(file) {
 }
 
 async function sendPreview(file, sheet) {
-  const formData = new FormData();
-  formData.append('file', file);
-  if (sheet) formData.append('sheet', sheet);
-
+  // Procesar localmente en el browser — rápido, sin mandar al servidor
   try {
-    const res  = await fetch(`${API_BASE}/api/preview`, { method: 'POST', body: formData });
-    const data = await res.json();
+    const buffer = await file.arrayBuffer();
+    const wb     = XLSX.read(buffer, { type: 'array', cellDates: false });
 
-    if (!res.ok) {
-      const msg = Array.isArray(data.detail)
-        ? data.detail.map(e => e.message).join(' · ')
-        : data.error || 'Error al procesar el archivo.';
-      setStatus('error', msg);
-      return;
-    }
+    const wsName = sheet || wb.SheetNames.find(s => s.toLowerCase().includes('strade')) || wb.SheetNames[0];
 
-    // Varias hojas y no se eligió — mostrar selector
-    if (data.sheets && data.sheets.length > 1 && !sheet) {
+    // Si hay varias hojas y no se eligió, mostrar selector
+    if (!sheet && wb.SheetNames.length > 1) {
       setStatus('loading', 'El archivo tiene varias hojas. ¿Cuál querés procesar?');
-      document.getElementById('sheetList').innerHTML = data.sheets.map(s =>
+      document.getElementById('sheetList').innerHTML = wb.SheetNames.map(s =>
         `<button class="sheet-btn" onclick="sendPreview(pendingFile,'${s}')">${s}</button>`
       ).join('');
       document.getElementById('sheetSelector').style.display = 'block';
       return;
     }
 
-    pendingToken = data.token;
-    showPreview(data);
+    const ws        = wb.Sheets[wsName];
+    const headerRow = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false })[0];
+    const dataRows  = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
+    dataRows[0]     = headerRow;
+
+    // Parsear filas localmente
+    const parsed = parseRowsLocal(dataRows, wsName);
+    if (!parsed) return;
+
+    pendingRows     = parsed.rows;
+    pendingFilename = file.name;
+    pendingSheet    = wsName;
+
+    showPreviewLocal(parsed, file.name, wsName, wb.SheetNames);
 
   } catch(err) {
-    setStatus('error', 'No se pudo conectar con el servidor.');
+    setStatus('error', 'Error al procesar el archivo: ' + err.message);
   }
 }
+
+function parseRowsLocal(rows, wsName) {
+  if (rows.length < 2) { setStatus('error', 'La hoja está vacía.'); return null; }
+
+  const header = rows[0].map(h => String(h || '').trim().toLowerCase());
+  const findCol = (...kws) => {
+    for (const kw of kws) {
+      const i = header.findIndex(h => h.includes(kw));
+      if (i !== -1) return i;
+    }
+    return -1;
+  };
+
+  const iId   = findCol('identificador');
+  const iItem = findCol('item');
+  const iDate = findCol('fecha');
+  const iNCM  = findCol('ncm');
+  const iPais = findCol('país de destino', 'pais de destino', 'destino', 'país', 'pais');
+  const iVol  = findCol('cantidad3', 'cantidad');
+  const iFOB  = findCol('fob u', 'u$s fob', 'fob');
+
+  if (iDate === -1 || iNCM === -1 || iPais === -1 || iVol === -1) {
+    setStatus('error', `Columnas no encontradas en "${wsName}". ¿Es la hoja correcta?`);
+    return null;
+  }
+
+  const epoch = new Date(1899, 11, 31);
+  const parseDate = raw => {
+    if (!raw) return null;
+    if (typeof raw === 'number' && raw > 1000)
+      return new Date(epoch.getTime() + raw * 86400000);
+    const s = String(raw).trim();
+    const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (dmy) return new Date(+dmy[3], +dmy[2]-1, +dmy[1]);
+    const ymd = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (ymd) return new Date(+ymd[1], +ymd[2]-1, +ymd[3]);
+    return null;
+  };
+
+  const seen    = new Set();
+  const result  = [];
+  const byNcm   = {};
+  const meses   = new Set();
+  let skipped   = 0;
+
+  for (let i = 1; i < rows.length; i++) {
+    const r     = rows[i];
+    const fecha = parseDate(r[iDate]);
+    if (!fecha || isNaN(fecha.getTime())) { skipped++; continue; }
+    const yr = fecha.getFullYear();
+    if (yr < 2010 || yr > 2035) { skipped++; continue; }
+
+    const id   = iId   !== -1 ? String(r[iId]   || '').trim() : String(i);
+    const item = iItem !== -1 ? String(r[iItem]  || '').trim() : '1';
+    const ncm  = String(r[iNCM]  || '').replace(/[\.\-\s]/g,'').toUpperCase().trim();
+    const pais = String(r[iPais] || '').trim();
+    const vol  = parseFloat(String(r[iVol] || '0').replace(',','.'));
+    const fob  = iFOB !== -1 && r[iFOB] ? parseFloat(String(r[iFOB]).replace(',','.')) : 0;
+    const mes  = `${yr}-${String(fecha.getMonth()+1).padStart(2,'0')}`;
+
+    if (!ncm || !pais || isNaN(vol) || vol <= 0) { skipped++; continue; }
+
+    const key = `${id}|${item}`;
+    if (seen.has(key)) { skipped++; continue; }
+    seen.add(key);
+
+    result.push({ id, item, ncm, pais, mes, vol: parseFloat(vol.toFixed(2)), fob: parseFloat((fob||0).toFixed(2)) });
+
+    if (!byNcm[ncm]) byNcm[ncm] = { vol: 0, registros: 0, paises: new Set() };
+    byNcm[ncm].vol       += vol;
+    byNcm[ncm].registros += 1;
+    byNcm[ncm].paises.add(pais);
+    meses.add(mes);
+  }
+
+  if (result.length === 0) {
+    setStatus('error', 'No se pudo procesar ninguna fila válida.');
+    return null;
+  }
+
+  const mesArr = [...meses].sort();
+  return {
+    rows:    result,
+    skipped,
+    loaded:  rows.length - 1,
+    byNcm,
+    period_from: mesArr[0],
+    period_to:   mesArr[mesArr.length-1],
+    markets: new Set(result.map(r => r.pais)).size,
+  };
+}
+
+function showPreviewLocal(parsed, filename, wsName, sheetNames) {
+  document.getElementById('sheetSelector').style.display = 'none';
+  setStatus('success', `Preview listo — ${parsed.rows.length.toLocaleString()} registros únicos. (${parsed.skipped} omitidos)`);
+
+  const byNcm = Object.entries(parsed.byNcm).map(([ncm, v]) => {
+    const cfg = PRODUCT_CONFIG.find(p => p.ncm.replace(/[\.\-\s]/g,'').toUpperCase() === ncm);
+    return `<div class="product-pill"><span class="ncm">${ncm}</span>${cfg ? cfg.nombre : ncm} — ${fmtTon(v.vol)} ton</div>`;
+  }).join('');
+
+  document.getElementById('previewBar').style.display = 'block';
+  document.getElementById('previewBar').innerHTML = `
+    <div style="background:#f0fdf4;border:0.5px solid rgba(22,163,74,0.25);border-radius:10px;padding:18px 20px;margin-top:12px">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.06em;color:#166534;margin-bottom:14px;font-weight:500">
+        Preview — ${filename}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:14px">
+        <div><div style="font-size:22px;font-weight:600">${parsed.rows.length.toLocaleString()}</div><div style="font-size:11px;color:#666">registros únicos</div></div>
+        <div><div style="font-size:22px;font-weight:600">${Object.keys(parsed.byNcm).length}</div><div style="font-size:11px;color:#666">productos</div></div>
+        <div><div style="font-size:22px;font-weight:600">${parsed.markets}</div><div style="font-size:11px;color:#666">mercados</div></div>
+        <div><div style="font-size:14px;font-weight:600">${parsed.period_from} → ${parsed.period_to}</div><div style="font-size:11px;color:#666">período</div></div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">${byNcm}</div>
+      <div id="progressWrap" style="display:none;margin-bottom:12px">
+        <div style="font-size:12px;color:#166534;margin-bottom:6px" id="progressLabel">Guardando...</div>
+        <div style="background:rgba(0,0,0,0.08);border-radius:4px;height:8px;overflow:hidden">
+          <div id="progressBar" style="height:100%;background:#16a34a;border-radius:4px;width:0%;transition:width 0.3s"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn" id="btnConfirm" onclick="confirmUpload(this)">✓ Guardar en base de datos</button>
+        <button class="btn" style="background:#fff;color:#991b1b;border:0.5px solid rgba(153,27,27,0.2)" onclick="discardUpload()">Descartar</button>
+      </div>
+    </div>`;
+}
+
 
 function showPreview(data) {
   document.getElementById('sheetSelector').style.display = 'none';

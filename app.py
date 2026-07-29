@@ -129,6 +129,7 @@ def status():
 
 @app.route("/api/preview", methods=["POST"])
 def preview_upload():
+    """Solo valida que el archivo sea correcto. El browser procesa localmente."""
     if "file" not in request.files:
         return jsonify({"error": "No se envió ningún archivo"}), 400
 
@@ -145,7 +146,8 @@ def preview_upload():
         sheet_name = candidates[0] if candidates else wb.sheet_names[0]
 
     try:
-        raw = pd.read_excel(wb, sheet_name=sheet_name)
+        # Leer solo las primeras 5 filas para validar columnas
+        raw = pd.read_excel(wb, sheet_name=sheet_name, nrows=5)
     except Exception as e:
         return jsonify({"error": f"Error leyendo hoja '{sheet_name}': {e}"}), 400
 
@@ -154,48 +156,11 @@ def preview_upload():
         return jsonify({"error": "Columnas requeridas no encontradas",
                         "detail": errors, "columns_found": list(raw.columns)}), 422
 
-    rows, skipped = parse_rows(raw, mapping)
-    if not rows:
-        return jsonify({"error": "No se pudo procesar ninguna fila válida."}), 422
-
-    # Deduplicar por (identificador, item) antes de mandar al browser
-    seen = set()
-    unique_rows = []
-    for r in rows:
-        key = (r[0], r[1])
-        if key not in seen:
-            seen.add(key)
-            unique_rows.append(r)
-
-    by_ncm = defaultdict(lambda: {"vol": 0, "registros": 0, "paises": set()})
-    meses  = set()
-    for r in unique_rows:
-        by_ncm[r[2]]["vol"]       += r[5]
-        by_ncm[r[2]]["registros"] += 1
-        by_ncm[r[2]]["paises"].add(r[3])
-        meses.add(r[4])
-
-    # Devolver filas al browser para que las mande en bloques
-    rows_for_client = [
-        {"id": r[0], "item": r[1], "ncm": r[2], "pais": r[3],
-         "mes": r[4], "vol": r[5], "fob": r[6]}
-        for r in unique_rows
-    ]
-
     return jsonify({
-        "ok": True, "sheet": sheet_name,
-        "sheets": wb.sheet_names, "filename": file.filename,
-        "loaded": len(rows), "skipped": skipped,
-        "unique": len(unique_rows),
-        "period_from": min(meses), "period_to": max(meses),
-        "products": len(by_ncm), "markets": len({r[3] for r in unique_rows}),
-        "by_ncm": [{"ncm": k, "vol_total": round(v["vol"], 1),
-                    "registros": v["registros"], "paises": len(v["paises"])}
-                   for k, v in by_ncm.items()],
-        "columns_mapped": mapping,
-        "rows": rows_for_client,  # filas para mandar en bloques
-        "filename": file.filename,
-        "sheet": sheet_name,
+        "ok":      True,
+        "sheet":   sheet_name,
+        "sheets":  wb.sheet_names,
+        "valid":   True,
     })
 
 
