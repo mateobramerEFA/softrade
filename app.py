@@ -1,17 +1,17 @@
 import os
 import io
 import json
-import threading
+import logging
 from pathlib import Path
 from datetime import datetime
 from contextlib import contextmanager
 from collections import defaultdict
+
 import pandas as pd
 import pyodbc
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, render_template
 
-import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ def _build_conn_str():
     return (
         f"DRIVER={{ODBC Driver 18 for SQL Server}};"
         f"SERVER={server};DATABASE={database};UID={uid};PWD={pwd};"
-        f"Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30"
+        f"Encrypt=yes;TrustServerCertificate=no;Connection Timeout=60"
     )
 
 @contextmanager
@@ -50,49 +50,6 @@ def get_db():
         raise
     finally:
         conn.close()
-
-# ── Staging en DB ──────────────────────────────────────────────────────────
-def save_staging(token, filename, sheet, rows):
-    data = json.dumps({"filename": filename, "sheet": sheet, "rows": rows})
-    with get_db() as conn:
-        conn.cursor().execute("""
-            INSERT INTO softrade_staging (token, filename, sheet, data, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        """, (token, filename, sheet, data, datetime.now().isoformat()))
-
-def load_staging(token):
-    with get_db() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT data FROM softrade_staging WHERE token=?", (token,))
-        row = cur.fetchone()
-        if not row: return None
-        return json.loads(row[0])
-
-def delete_staging(token):
-    with get_db() as conn:
-        conn.cursor().execute("DELETE FROM softrade_staging WHERE token=?", (token,))
-
-# ── Jobs en DB ─────────────────────────────────────────────────────────────
-def save_job(job_id, status, **kwargs):
-    data = json.dumps({"status": status, "updated": datetime.now().isoformat(), **kwargs})
-    with get_db() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT 1 FROM softrade_staging WHERE token=?", (job_id,))
-        if cur.fetchone():
-            cur.execute("UPDATE softrade_staging SET data=? WHERE token=?", (data, job_id))
-        else:
-            cur.execute("""
-                INSERT INTO softrade_staging (token, filename, sheet, data, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (job_id, '', '', data, datetime.now().isoformat()))
-
-def load_job(job_id):
-    with get_db() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT data FROM softrade_staging WHERE token=?", (job_id,))
-        row = cur.fetchone()
-        if not row: return None
-        return json.loads(row[0])
 
 # ── Validación ─────────────────────────────────────────────────────────────
 REQUIRED_COLS = {
@@ -146,84 +103,6 @@ def parse_rows(df, mapping):
             skipped += 1
     return rows, skipped
 
-# ── Background job ─────────────────────────────────────────────────────────
-def run_confirm_job(job_id, token):
-    try:
-        logger.info(f"[JOB {job_id}] Iniciando...")
-        save_job(job_id, "running", message="Cargando datos...")
-        data = load_staging(token)
-        if not data:
-            logger.error(f"[JOB {job_id}] Staging no encontrado para token {token}")
-            save_job(job_id, "error", error="Staging no encontrado.")
-            return
-
-        rows = [(r["id"], r["item"], r["ncm"], r["pais"], r["mes"], r["vol"], r["fob"])
-                for r in data["rows"]]
-        logger.info(f"[JOB {job_id}] {len(rows)} filas a insertar")
-        save_job(job_id, "running", message=f"Insertando {len(rows)} filas en Azure SQL...")
-
-        with get_db() as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE #staging_upload (
-                    identificador NVARCHAR(100),
-                    item          NVARCHAR(50),
-                    ncm           NVARCHAR(50),
-                    pais          NVARCHAR(100),
-                    mes           NVARCHAR(7),
-                    vol           FLOAT,
-                    fob           FLOAT
-                )
-            """)
-            cur.fast_executemany = True
-            cur.executemany("INSERT INTO #staging_upload VALUES (?,?,?,?,?,?,?)", rows)
-
-            cur.execute("""
-                MERGE softrade_exportaciones AS target
-                USING (
-                    SELECT identificador, item, ncm, pais, mes, vol, fob
-                    FROM (
-                        SELECT *, ROW_NUMBER() OVER (
-                            PARTITION BY identificador, item ORDER BY (SELECT NULL)
-                        ) AS rn
-                        FROM #staging_upload
-                    ) x WHERE rn = 1
-                ) AS source
-                ON target.identificador = source.identificador
-                AND target.item = source.item
-                WHEN NOT MATCHED THEN
-                    INSERT (identificador, item, ncm, pais, mes, vol, fob)
-                    VALUES (source.identificador, source.item, source.ncm,
-                            source.pais, source.mes, source.vol, source.fob);
-            """)
-            inserted   = cur.rowcount
-            duplicates = len(rows) - inserted
-            cur.execute("DROP TABLE #staging_upload")
-
-            meses = [r[4] for r in rows]
-            cur.execute("""
-                INSERT INTO softrade_cargas
-                    (filename, sheet, registros, omitidos, duplicados,
-                     periodo_from, periodo_to, snapshot, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (data["filename"], data["sheet"], inserted, 0,
-                  duplicates, min(meses), max(meses),
-                  None, datetime.now().isoformat()))
-
-        delete_staging(token)
-
-        with get_db() as conn:
-            total = conn.cursor().execute(
-                "SELECT COUNT(*) FROM softrade_exportaciones"
-            ).fetchone()[0]
-
-        save_job(job_id, "done", inserted=inserted, duplicates=duplicates, total_db=total)
-        logger.info(f"[JOB {job_id}] Done — inserted={inserted} duplicates={duplicates} total={total}")
-
-    except Exception as e:
-        logger.error(f"[JOB {job_id}] Error: {e}", exc_info=True)
-        save_job(job_id, "error", error=str(e))
-
 # ── Frontend ───────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
@@ -241,7 +120,6 @@ def status():
         cur.execute("SELECT TOP 10 * FROM softrade_cargas ORDER BY timestamp DESC")
         cols    = [d[0] for d in cur.description]
         uploads = [dict(zip(cols, row)) for row in cur.fetchall()]
-
     return jsonify({
         "records": records, "products": products, "markets": markets,
         "period_from": period[0], "period_to": period[1],
@@ -280,63 +158,120 @@ def preview_upload():
     if not rows:
         return jsonify({"error": "No se pudo procesar ninguna fila válida."}), 422
 
-    token   = datetime.now().strftime("%Y%m%d_%H%M%S")
-    staging = [{"id": r[0], "item": r[1], "ncm": r[2], "pais": r[3],
-                "mes": r[4], "vol": r[5], "fob": r[6]} for r in rows]
-    save_staging(token, file.filename, sheet_name, staging)
+    # Deduplicar por (identificador, item) antes de mandar al browser
+    seen = set()
+    unique_rows = []
+    for r in rows:
+        key = (r[0], r[1])
+        if key not in seen:
+            seen.add(key)
+            unique_rows.append(r)
 
     by_ncm = defaultdict(lambda: {"vol": 0, "registros": 0, "paises": set()})
     meses  = set()
-    for r in rows:
+    for r in unique_rows:
         by_ncm[r[2]]["vol"]       += r[5]
         by_ncm[r[2]]["registros"] += 1
         by_ncm[r[2]]["paises"].add(r[3])
         meses.add(r[4])
 
+    # Devolver filas al browser para que las mande en bloques
+    rows_for_client = [
+        {"id": r[0], "item": r[1], "ncm": r[2], "pais": r[3],
+         "mes": r[4], "vol": r[5], "fob": r[6]}
+        for r in unique_rows
+    ]
+
     return jsonify({
-        "ok": True, "token": token, "sheet": sheet_name,
+        "ok": True, "sheet": sheet_name,
         "sheets": wb.sheet_names, "filename": file.filename,
         "loaded": len(rows), "skipped": skipped,
+        "unique": len(unique_rows),
         "period_from": min(meses), "period_to": max(meses),
-        "products": len(by_ncm), "markets": len({r[3] for r in rows}),
+        "products": len(by_ncm), "markets": len({r[3] for r in unique_rows}),
         "by_ncm": [{"ncm": k, "vol_total": round(v["vol"], 1),
                     "registros": v["registros"], "paises": len(v["paises"])}
                    for k, v in by_ncm.items()],
         "columns_mapped": mapping,
+        "rows": rows_for_client,  # filas para mandar en bloques
+        "filename": file.filename,
+        "sheet": sheet_name,
     })
 
 
-@app.route("/api/confirm/<token>", methods=["POST"])
-def confirm_upload(token):
-    data = load_staging(token)
+@app.route("/api/upload_block", methods=["POST"])
+def upload_block():
+    """Recibe un bloque de filas y las inserta directo en la tabla."""
+    data = request.get_json()
     if not data:
-        return jsonify({"error": "Token inválido o expirado."}), 404
+        return jsonify({"error": "No se recibieron datos"}), 400
 
-    job_id = f"job_{token}"
-    save_job(job_id, "pending", message="Iniciando...")
+    rows     = data.get("rows", [])
+    filename = data.get("filename", "")
+    sheet    = data.get("sheet", "")
+    is_last  = data.get("is_last", False)
+    total_inserted = data.get("total_inserted", 0)
+    total_duplicates = data.get("total_duplicates", 0)
 
-    t = threading.Thread(
-        target=run_confirm_job,
-        args=(job_id, token),
-        daemon=True
-    )
-    t.start()
+    if not rows:
+        return jsonify({"ok": True, "inserted": 0, "duplicates": 0})
 
-    return jsonify({"ok": True, "job_id": job_id})
+    rows_tuple = [(r["id"], r["item"], r["ncm"], r["pais"], r["mes"], r["vol"], r["fob"])
+                  for r in rows]
 
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE #blk (
+                    identificador NVARCHAR(100),
+                    item          NVARCHAR(50),
+                    ncm           NVARCHAR(50),
+                    pais          NVARCHAR(100),
+                    mes           NVARCHAR(7),
+                    vol           FLOAT,
+                    fob           FLOAT
+                )
+            """)
+            cur.fast_executemany = True
+            cur.executemany("INSERT INTO #blk VALUES (?,?,?,?,?,?,?)", rows_tuple)
 
-@app.route("/api/job/<job_id>")
-def job_status(job_id):
-    job = load_job(job_id)
-    if not job:
-        return jsonify({"status": "pending", "message": "Iniciando..."})
-    return jsonify(job)
+            cur.execute("""
+                MERGE softrade_exportaciones AS target
+                USING #blk AS source
+                ON target.identificador = source.identificador
+                AND target.item = source.item
+                WHEN NOT MATCHED THEN
+                    INSERT (identificador, item, ncm, pais, mes, vol, fob)
+                    VALUES (source.identificador, source.item, source.ncm,
+                            source.pais, source.mes, source.vol, source.fob);
+            """)
+            inserted   = cur.rowcount
+            duplicates = len(rows_tuple) - inserted
+            cur.execute("DROP TABLE #blk")
 
+            # Si es el último bloque, registrar la carga
+            if is_last:
+                final_inserted   = total_inserted + inserted
+                final_duplicates = total_duplicates + duplicates
+                with get_db() as conn2:
+                    cur2 = conn2.cursor()
+                    cur2.execute("SELECT MIN(mes), MAX(mes) FROM softrade_exportaciones")
+                    period = cur2.fetchone()
+                    cur2.execute("""
+                        INSERT INTO softrade_cargas
+                            (filename, sheet, registros, omitidos, duplicados,
+                             periodo_from, periodo_to, snapshot, timestamp)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (filename, sheet, final_inserted, 0, final_duplicates,
+                          period[0], period[1], None, datetime.now().isoformat()))
 
-@app.route("/api/discard/<token>", methods=["POST"])
-def discard_upload(token):
-    delete_staging(token)
-    return jsonify({"ok": True})
+        logger.info(f"Block inserted={inserted} duplicates={duplicates} is_last={is_last}")
+        return jsonify({"ok": True, "inserted": inserted, "duplicates": duplicates})
+
+    except Exception as e:
+        logger.error(f"Block error: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/products")

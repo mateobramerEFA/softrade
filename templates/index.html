@@ -478,8 +478,11 @@ function showPage(name, el) {
 }
 
 // ── FILE HANDLING — todo pasa por el backend ───────────────────────────────
-let pendingToken = null;
-let pendingFile  = null;
+let pendingToken    = null;
+let pendingFile     = null;
+let pendingRows     = [];
+let pendingFilename = '';
+let pendingSheet    = '';
 
 function handleDrop(e) {
   e.preventDefault();
@@ -543,6 +546,11 @@ function showPreview(data) {
     return `<div class="product-pill"><span class="ncm">${r.ncm}</span>${cfg ? cfg.nombre : r.ncm} — ${fmtTon(r.vol_total)} ton</div>`;
   }).join('');
 
+  // Guardar filas para el upload por bloques
+  pendingRows     = data.rows || [];
+  pendingFilename = data.filename;
+  pendingSheet    = data.sheet;
+
   document.getElementById('previewBar').style.display = 'block';
   document.getElementById('previewBar').innerHTML = `
     <div style="background:#f0fdf4;border:0.5px solid rgba(22,163,74,0.25);border-radius:10px;padding:18px 20px;margin-top:12px">
@@ -551,11 +559,17 @@ function showPreview(data) {
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:14px">
         <div><div style="font-size:22px;font-weight:600">${data.loaded.toLocaleString()}</div><div style="font-size:11px;color:#666">registros</div></div>
-        <div><div style="font-size:22px;font-weight:600">${data.products}</div><div style="font-size:11px;color:#666">productos</div></div>
+        <div><div style="font-size:22px;font-weight:600">${data.unique || data.products}</div><div style="font-size:11px;color:#666">únicos</div></div>
         <div><div style="font-size:22px;font-weight:600">${data.markets}</div><div style="font-size:11px;color:#666">mercados</div></div>
         <div><div style="font-size:14px;font-weight:600">${data.period_from} → ${data.period_to}</div><div style="font-size:11px;color:#666">período</div></div>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">${byNcm}</div>
+      <div id="progressWrap" style="display:none;margin-bottom:12px">
+        <div style="font-size:12px;color:#166534;margin-bottom:6px" id="progressLabel">Guardando...</div>
+        <div style="background:rgba(0,0,0,0.08);border-radius:4px;height:8px;overflow:hidden">
+          <div id="progressBar" style="height:100%;background:#16a34a;border-radius:4px;width:0%;transition:width 0.3s"></div>
+        </div>
+      </div>
       <div style="display:flex;gap:10px">
         <button class="btn" id="btnConfirm" onclick="confirmUpload(this)">✓ Guardar en base de datos</button>
         <button class="btn" style="background:#fff;color:#991b1b;border:0.5px solid rgba(153,27,27,0.2)" onclick="discardUpload()">Descartar</button>
@@ -564,59 +578,70 @@ function showPreview(data) {
 }
 
 async function confirmUpload(btn) {
-  if (!pendingToken) return;
+  if (!pendingRows || pendingRows.length === 0) return;
   btn.disabled    = true;
-  btn.textContent = 'Iniciando...';
+  btn.textContent = 'Guardando...';
+
+  const BLOCK_SIZE = 500;
+  const total      = pendingRows.length;
+  let inserted     = 0;
+  let duplicates   = 0;
+  let totalInserted  = 0;
+  let totalDuplicates = 0;
+
+  // Mostrar barra de progreso
+  document.getElementById('progressWrap').style.display = 'block';
 
   try {
-    const res  = await fetch(`${API_BASE}/api/confirm/${pendingToken}`, { method: 'POST' });
-    const data = await res.json();
+    for (let i = 0; i < total; i += BLOCK_SIZE) {
+      const block  = pendingRows.slice(i, i + BLOCK_SIZE);
+      const isLast = (i + BLOCK_SIZE) >= total;
+      const pct    = Math.round((i / total) * 100);
 
-    if (!data.ok) {
-      setStatus('error', data.error || 'Error al iniciar la carga.');
-      btn.disabled    = false;
-      btn.textContent = '✓ Guardar en base de datos';
-      return;
-    }
+      document.getElementById('progressBar').style.width  = pct + '%';
+      document.getElementById('progressLabel').textContent = `Guardando bloque ${Math.floor(i/BLOCK_SIZE)+1} de ${Math.ceil(total/BLOCK_SIZE)}... (${pct}%)`;
 
-    pendingToken = null;
-    document.getElementById('previewBar').style.display = 'none';
+      const res  = await fetch(`${API_BASE}/api/upload_block`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rows:             block,
+          filename:         pendingFilename,
+          sheet:            pendingSheet,
+          is_last:          isLast,
+          total_inserted:   totalInserted,
+          total_duplicates: totalDuplicates,
+        })
+      });
+      const data = await res.json();
 
-    const jobId = data.job_id;
-    setStatus('loading', 'Guardando en base de datos...');
-
-    const poll = setInterval(async () => {
-      try {
-        const jr  = await fetch(`${API_BASE}/api/job/${jobId}`);
-        const job = await jr.json();
-
-        if (job.status === 'done') {
-          clearInterval(poll);
-          const msg = job.duplicates > 0
-            ? `✓ ${job.inserted} filas nuevas guardadas. ${job.duplicates} ya existían.`
-            : `✓ ${job.inserted} filas guardadas correctamente.`;
-          setStatus('success', msg);
-          await loadDBIntoMemory();
-          btn.disabled    = false;
-          btn.textContent = '✓ Guardar en base de datos';
-        } else if (job.status === 'error') {
-          clearInterval(poll);
-          setStatus('error', `Error: ${job.error}`);
-          btn.disabled    = false;
-          btn.textContent = '✓ Guardar en base de datos';
-        } else {
-          setStatus('loading', job.message || 'Procesando...');
-        }
-      } catch(e) {
-        clearInterval(poll);
-        setStatus('error', 'Error al verificar el estado de la carga.');
+      if (!res.ok) {
+        setStatus('error', `Error en bloque ${Math.floor(i/BLOCK_SIZE)+1}: ${data.error}`);
         btn.disabled    = false;
         btn.textContent = '✓ Guardar en base de datos';
+        return;
       }
-    }, 2000);
+
+      totalInserted   += data.inserted;
+      totalDuplicates += data.duplicates;
+    }
+
+    // Completado
+    document.getElementById('progressBar').style.width   = '100%';
+    document.getElementById('progressLabel').textContent = '✓ Completado';
+
+    const msg = totalDuplicates > 0
+      ? `✓ ${totalInserted} filas nuevas guardadas. ${totalDuplicates} ya existían.`
+      : `✓ ${totalInserted} filas guardadas correctamente.`;
+    setStatus('success', msg);
+
+    pendingRows     = [];
+    pendingToken    = null;
+    document.getElementById('previewBar').style.display = 'none';
+    await loadDBIntoMemory();
 
   } catch(err) {
-    setStatus('error', 'Error de conexión al confirmar.');
+    setStatus('error', 'Error de conexión al guardar.');
     btn.disabled    = false;
     btn.textContent = '✓ Guardar en base de datos';
   }
