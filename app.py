@@ -175,7 +175,15 @@ def run_confirm_job(job_id, token):
 
             cur.execute("""
                 MERGE softrade_exportaciones AS target
-                USING #staging_upload AS source
+                USING (
+                    SELECT identificador, item, ncm, pais, mes, vol, fob
+                    FROM (
+                        SELECT *, ROW_NUMBER() OVER (
+                            PARTITION BY identificador, item ORDER BY (SELECT NULL)
+                        ) AS rn
+                        FROM #staging_upload
+                    ) x WHERE rn = 1
+                ) AS source
                 ON target.identificador = source.identificador
                 AND target.item = source.item
                 WHEN NOT MATCHED THEN
