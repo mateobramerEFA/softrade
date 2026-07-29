@@ -821,7 +821,10 @@ async function loadDBIntoMemory() {
       });
     });
     populateFilters();
-    showUploadSummary();
+    // Solo mostrar resumen si los elementos existen (solapa Carga de datos)
+    if (document.getElementById('summaryCards')) {
+      showUploadSummary();
+    }
   } catch(err) {
     console.warn('No se pudo cargar desde el backend:', err.message);
   }
