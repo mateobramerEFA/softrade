@@ -7,10 +7,9 @@ from datetime import datetime
 from contextlib import contextmanager
 from collections import defaultdict
 
-import pandas as pd
-import pyodbc
-from dotenv import load_dotenv
-from flask import Flask, request, jsonify, render_template
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -146,15 +145,17 @@ def parse_rows(df, mapping):
 # ── Background job ─────────────────────────────────────────────────────────
 def run_confirm_job(job_id, token):
     try:
+        logger.info(f"[JOB {job_id}] Iniciando...")
         save_job(job_id, "running", message="Cargando datos...")
         data = load_staging(token)
         if not data:
+            logger.error(f"[JOB {job_id}] Staging no encontrado para token {token}")
             save_job(job_id, "error", error="Staging no encontrado.")
             return
 
         rows = [(r["id"], r["item"], r["ncm"], r["pais"], r["mes"], r["vol"], r["fob"])
                 for r in data["rows"]]
-
+        logger.info(f"[JOB {job_id}] {len(rows)} filas a insertar")
         save_job(job_id, "running", message=f"Insertando {len(rows)} filas en Azure SQL...")
 
         with get_db() as conn:
@@ -213,8 +214,10 @@ def run_confirm_job(job_id, token):
             ).fetchone()[0]
 
         save_job(job_id, "done", inserted=inserted, duplicates=duplicates, total_db=total)
+        logger.info(f"[JOB {job_id}] Done — inserted={inserted} duplicates={duplicates} total={total}")
 
     except Exception as e:
+        logger.error(f"[JOB {job_id}] Error: {e}", exc_info=True)
         save_job(job_id, "error", error=str(e))
 
 # ── Frontend ───────────────────────────────────────────────────────────────
