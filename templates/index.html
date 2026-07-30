@@ -882,8 +882,6 @@ function populateFilters() {
     '<option value="">Seleccionar producto...</option>' + opts;
   document.getElementById('filterOppsProduct').innerHTML =
     '<option value="">Todos los productos</option>' + opts;
-  document.getElementById('filterCapturaProduct').innerHTML =
-    '<option value="">Todos los productos</option>' + opts;
 
   const allCountries = new Set();
   Object.values(DB).forEach(paises => Object.keys(paises).forEach(p => allCountries.add(p)));
